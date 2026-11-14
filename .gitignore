@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.pem
+*.key
+*.zip
+*.jsonl
+*state*.json
+*.lock
+.mm-*
+.export-state-*
+data/
+exports/
+archives/
+secrets/
+.DS_Store
