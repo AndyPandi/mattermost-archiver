@@ -10,7 +10,7 @@ Python 3.9+ standard-library CLI separates privileged full-server extraction fro
 - Offline list/convert/verify with public default, explicit private opt-in and team/channel selection, categories, Seoul/default configurable timezone, sorted nested threads and attachment-only posts, reactions, edits and pin metadata.
 - Original attachment bytes, shallow hashed names, escaped HTML, no script/CDN/remote images, streaming hashes/copies, manifest input provenance and skipped/count verification.
 - Traversal/symlink/duplicate/compression-budget rejection, missing selected attachment refusal and temporary staging.
-- Korean-default README.md and English README.en.md extraction-through-Mac-viewing manuals; synthetic adversarial and mocked export tests.
+- Korean-default README.md and English README.en.md five-step extraction-to-browser quick starts and separate detailed manuals; synthetic adversarial and mocked export tests.
 
 ## Current priorities
 Independent review and authorized representative deployment validation before production use.
