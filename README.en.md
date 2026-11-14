@@ -118,3 +118,9 @@ Attachment names use `sanitized-name__last8hash.ext`, extending the suffix on co
 - [Implementation scope](docs/project-state.md)
 - ZIPs are unencrypted. Confirm sharing scope and verify an external copy before deleting the server.
 - Markdown is plain text; plugin data restoration is not guaranteed. Open only trusted attachments.
+
+## License
+
+Project code and documentation are licensed under the [MIT License](LICENSE). Commercial use, modification and redistribution are permitted subject to retaining the copyright and permission notice. Provided without warranty.
+
+Mattermost and third-party components retain their own licenses. Exported conversations and attachments do not automatically become MIT-licensed.

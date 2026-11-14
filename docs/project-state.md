@@ -28,4 +28,4 @@ Potential future work needs separate scope: streaming disk-backed post indexing,
 
 - Attachment filenames use a last-8 path-hash suffix before the extension, with casefold collision detection and 4-character expansion up to 64; integrity SHA-256 unchanged.
 
-- Public download quick starts support HTTPS clone, wget and curl, with private fallback. No project LICENSE has been selected.
+- Public download quick starts support HTTPS clone, wget and curl, with private fallback. Project code and documentation use the MIT License (LICENSE); archived user data and third-party software retain their own rights.
