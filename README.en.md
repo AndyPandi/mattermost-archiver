@@ -51,16 +51,32 @@ The ZIP test must report no errors. `umask 077` restricts newly created files to
 
 ## 3. Download the archiver
 
-Open the [repository](https://github.com/AndyPandi/mattermost-archiver), choose **Code → Download ZIP**, and transfer the source ZIP to the server home directory. A private repository requires GitHub sign-in.
+**For a public repository, download directly on the server.** Git clone is recommended for easy updates; no login or deploy key is needed.
 
 ```sh
 cd ~
+git clone https://github.com/AndyPandi/mattermost-archiver.git
+cd mattermost-archiver
+python3 --version
+```
+
+Without Git, use either wget or curl to download the ZIP (choose one).
+
+```sh
+cd ~
+wget -O mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+
+# curl alternative (choose ONE download command)
+# curl -fL -o mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+
 python3 -m zipfile -e mattermost-archiver-main.zip archiver-source
 cd ~/archiver-source/mattermost-archiver-main
 python3 --version
 ```
 
-Confirm Python 3.9+. If already downloaded, enter the existing source folder. Unpack updates into a new folder to preserve previous files.
+Confirm Python 3.9+. Use a new location if files/directories exist to avoid overwriting. Existing Git clones may use `git pull --ff-only` after inspecting local changes. main is mutable: record or pin a tested commit. Inspect downloaded code before execution; do not pipe downloads into a shell.
+
+**If still private, anonymous downloads fail.** Sign into GitHub, use Code → Download ZIP and transfer the file to the server. Never embed tokens or keys in URLs.
 
 ## 4. Convert the archive
 

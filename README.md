@@ -51,16 +51,32 @@ ZIP 검사에서 오류가 없어야 합니다. `umask 077`은 새 파일을 본
 
 ## 3. 아카이빙 프로그램 다운로드
 
-[저장소](https://github.com/AndyPandi/mattermost-archiver)에서 **Code → Download ZIP**을 선택합니다. 비공개 상태라면 GitHub 로그인이 필요합니다. 프로그램 ZIP을 서버 홈 디렉터리로 전송한 뒤:
+**공개 저장소 기준: 서버에서 직접 받습니다.** 업데이트가 쉬운 git clone을 권장하며 로그인·deploy key는 필요 없습니다.
 
 ```sh
 cd ~
+git clone https://github.com/AndyPandi/mattermost-archiver.git
+cd mattermost-archiver
+python3 --version
+```
+
+Git이 없다면 wget 또는 curl로 ZIP을 다운로드할 수 있습니다. 둘 중 하나만 사용하세요.
+
+```sh
+cd ~
+wget -O mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+
+# curl alternative (choose ONE download command)
+# curl -fL -o mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+
 python3 -m zipfile -e mattermost-archiver-main.zip archiver-source
 cd ~/archiver-source/mattermost-archiver-main
 python3 --version
 ```
 
-Python 3.9 이상인지 확인합니다. 이미 내려받았다면 해당 프로그램 폴더로 이동하세요. 업데이트는 새 폴더에 풀어 이전 파일을 보존하세요.
+Python 3.9 이상인지 확인하세요. 기존 폴더·파일이 있다면 새 작업 위치를 사용해 덮어쓰기를 피하세요. Git clone으로 받은 경우 로컬 변경을 확인한 뒤 `git pull --ff-only`로 갱신할 수 있습니다. main은 변경될 수 있으니 검증한 커밋을 기록하거나 고정하세요. 다운로드한 코드를 확인한 후 실행하고 `curl | sh` 같은 즉시 실행은 사용하지 않습니다.
+
+**아직 비공개라면 익명 다운로드는 실패합니다.** GitHub 로그인 후 Code → Download ZIP으로 받아 서버에 전송하세요. 토큰·개인키를 URL에 넣지 마세요.
 
 ## 4. 아카이빙 실행
 

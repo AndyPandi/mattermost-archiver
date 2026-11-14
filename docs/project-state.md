@@ -27,3 +27,5 @@ Independent review and authorized representative deployment validation before pr
 Potential future work needs separate scope: streaming disk-backed post indexing, richer safe Markdown, representative server-version compatibility matrix. No scheduled rollout or production operation is authorized.
 
 - Attachment filenames use a last-8 path-hash suffix before the extension, with casefold collision detection and 4-character expansion up to 64; integrity SHA-256 unchanged.
+
+- Public download quick starts support HTTPS clone, wget and curl, with private fallback. No project LICENSE has been selected.
