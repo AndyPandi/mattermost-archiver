@@ -68,7 +68,7 @@ Plan for the server-generated export, container download, host raw ZIP, conversi
 
 ## 3. Administrator manual extraction (default for a new OCI VM)
 
-**Proceed only with explicit full-server export consent.** Selecting one public channel later does not narrow extraction. Check every command succeeds; stop on failure. Run from the ordinary user's SSH shell, applying sudo only to the Docker commands below. New OCI VMs have root-owned /opt/mattermost mode 0700, compose mode 0600, and opc outside the docker group. Never weaken directory/env/compose permissions or Docker socket/group access to bypass this boundary. The chown below transfers only the newly downloaded file in a fresh private temporary directory to the ordinary user. Subsequent list/convert/verify run without sudo.
+**Proceed only with explicit full-server export consent.** Selecting one public channel later does not narrow extraction. Check every command succeeds; stop on failure. Run from the ordinary user's SSH shell, applying sudo only to the Docker and scoped chown commands below. New OCI VMs have root-owned /opt/mattermost mode 0700, compose mode 0600, and opc outside the docker group. Never weaken directory/env/compose permissions or Docker socket/group access to bypass this boundary. The chown below transfers only the newly downloaded file in a fresh private temporary directory to the ordinary user. Subsequent list/convert/verify run without sudo.
 
 Run on the Docker host. Confirm syntax with the installed `mmctl --local export --help`. Replace `JOB_ID` and `ID_export.zip` with actual returned values.
 
@@ -85,8 +85,12 @@ sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
 
 # Use the exact export filename from the list.
 REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
-sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  mkdir -m 700 "$REMOTE_DIR"
+SEED_PARENT="$(mktemp -d)"
+mkdir -m 700 "$SEED_PARENT/private"
+# Pinned deployment Compose user only; NOT a generic Mattermost UID/GID.
+sudo chown 2000:2000 "$SEED_PARENT/private"
+sudo docker compose -f /opt/mattermost/compose.yaml cp -a \
+  "$SEED_PARENT/private" "mattermost:$REMOTE_DIR"
 sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
   /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
 
@@ -101,6 +105,8 @@ ln "$LOCAL_DIR/raw.zip" ./raw.zip
 python3 -m zipfile -t raw.zip
 sha256sum raw.zip
 ```
+No mkdir/sh/id/chmod/rm inside the container is assumed. mkdir/chown above run on the **host**; 2000:2000 applies only to the verified pinned Compose deployment. Have an administrator establish the correct UID:GID for other deployments. Docker cp -a preserves source ownership and permissions. Generate a fresh UUID path every time; never reuse it. Stop immediately if any command fails. ln refuses existing output. The container 0700 directory protects the sensitive ZIP and is retained, not automatically deleted: record its path and handle it under your retention policy without deleting server export originals. Host temporary directories also need retention management. An administrator must check container /tmp capacity separately.
+
 
 Wait for job success before downloading. On failure, inspect job errors and server logs. Container temporary downloads may disappear after recreation. Manage temporary copies through your retention process; these instructions do not delete source messages or export artifacts.
 
@@ -224,8 +230,8 @@ Installed mmctl help and deployment configuration govern version-specific behavi
 
 - `list`, `convert`, `verify`: `--max-bytes` 21474836480 (compressed input and total expanded bytes), `--max-entries` 100000, `--max-ratio` 200, `--max-line-bytes` 16777216, `--max-records` 1000000.
 - Conversion: `--max-post-bytes` 268435456 (serialized selected posts, not exact RSS), `--max-depth` 50, `--min-free-bytes` 1073741824. Free output disk must exceed 3 × total expanded input + reserve. Python object overhead and generated HTML expansion mean memory/disk estimates are not hard process limits. ZIP central-directory size is capped at 64 MiB before allocation; entry count is also prechecked. Use only authorized exports, not arbitrary hostile uploads.
-- Export: `--poll-interval` 5 seconds, `--poll-timeout` 3600, `--command-timeout` 600, `--min-free-bytes` 1073741824 is a host/container free-space floor, not export size prediction.
-- Preserve state and lock files for retries. Never delete an ambiguous state just to retry. A completed output is never overwritten; after a crash during publication, compare its hash to the persisted state. SIGKILL may leave generated temporary copies; inspect them manually, never sweep server export originals. POSIX flock, same-filesystem hard links, and container df/mkdir/stat/rm/rmdir are required.
+- Export: `--poll-interval` 5 seconds, `--poll-timeout` 3600, `--command-timeout` 600, `--min-free-bytes` 1073741824 is a host-only free-space floor (check container capacity separately), not export size prediction.
+- Preserve state and lock files for retries. Never delete an ambiguous state just to retry. A completed output is never overwritten; after a crash during publication, compare its hash to the persisted state. SIGKILL may leave generated temporary copies; inspect them manually, never sweep server export originals. POSIX flock, same-filesystem hard links and Docker archive-copy support are required; only mmctl is executed inside the container. Automated export requires an explicit numeric Config.User UID:GID (no default 2000 assumption). Staging is retained and all generated paths are recorded in state; no remote cleanup commands are run.
 - `verify` checks hashes, byte sizes, member set, and rendered post/reply/channel/attachment counts. It is not a signature or completeness proof. The manifest does not authenticate itself.
 - Native Python 3.9 runtime, OL9, macOS, live server, and browser integration are not certified by synthetic tests alone. Python timezone data must be installed by the OS.
 
@@ -233,3 +239,5 @@ Pinned source evidence (v11.7.0): [export commands](https://github.com/mattermos
 
 ### Attachment filenames
 Stored filenames use `sanitized-name__last8hash.ext`. The suffix is the last 8 hex characters of the original ZIP member path SHA-256, not a content hash. Case-insensitive collisions extend the suffix to 12, 16, and further characters up to 64; unresolved collisions fail without overwriting. HTML keeps the original display name. Manifest integrity hashes remain full SHA-256. Reconvert the original export to a new output ZIP to apply this policy; existing archives are not modified.
+
+Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.

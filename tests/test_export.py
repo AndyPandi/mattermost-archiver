@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -29,7 +30,11 @@ class ExportTests(unittest.TestCase):
         self.status = 'success'
         self.create_error = None
         self.copy_error = False
+        self.download_error = False
+        self.host_copy_error = False
         self.listed = True
+        self.container_user = '2345:3456'
+        self.container_id = 'b' * 64
         self.stdout = io.StringIO()
         self.stderr = io.StringIO()
         self.addCleanup(patch.stopall)
@@ -63,14 +68,34 @@ class ExportTests(unittest.TestCase):
                                 'data': {'error': 'DO NOT PRINT SECRET'}}]).encode()
         elif cmd[-2:] == ['export', 'list']:
             data = json.dumps([JOB + '_export.zip'] if self.listed else ['other_export.zip']).encode()
-        elif 'df' in cmd:
-            data = b'Filesystem 1024-blocks Used Available Capacity Mounted on\nx 100000 0 100000 0% /tmp\n'
-        elif 'stat' in cmd:
-            data = str(len(PAYLOAD)).encode()
+        elif 'ps' in cmd:
+            data = self.container_id.encode()
+        elif 'inspect' in cmd:
+            self.assertEqual(cmd, ['docker', 'inspect', '--format', '{{.Config.User}}', self.container_id])
+            data = self.container_user.encode()
+        elif 'download' in cmd and self.download_error:
+            return subprocess.CompletedProcess(cmd, 1, b'SECRET', b'SECRET')
         elif 'cp' in cmd:
             if self.copy_error:
                 return subprocess.CompletedProcess(cmd, 1, b'SECRET', b'SECRET')
-            Path(cmd[-1]).write_bytes(PAYLOAD)
+            if '-a' in cmd:
+                with tarfile.open(fileobj=io.BytesIO(kwargs['input'])) as tar:
+                    entries = tar.getmembers()
+                    self.assertEqual(len(entries), 1)
+                    entry = entries[0]
+                    self.assertTrue(entry.isdir())
+                    self.assertEqual((entry.mode, entry.uid, entry.gid), (0o700, 2345, 3456))
+                    self.assertRegex(entry.name, r'^mm-archiver-[0-9a-f]{32}$')
+                self.assertEqual(cmd[-1], self.container_id + ':/tmp')
+            else:
+                if self.host_copy_error:
+                    Path(cmd[-1]).write_bytes(b'partial SECRET')
+                    return subprocess.CompletedProcess(cmd, 1, b'SECRET', b'SECRET')
+                self.assertEqual(Path(cmd[-1]).parent.stat().st_mode & 0o777, 0o700)
+                Path(cmd[-1]).write_bytes(PAYLOAD)
+                Path(cmd[-1]).chmod(0o644)
+        if 'exec' in cmd:
+            self.assertIn('/mattermost/bin/mmctl', cmd)
         return subprocess.CompletedProcess(cmd, 0, data, b'')
 
     def test_complete_hash_permissions_cleanup_and_command(self):
@@ -81,13 +106,56 @@ class ExportTests(unittest.TestCase):
         self.assertEqual(state['sha256'], hashlib.sha256(PAYLOAD).hexdigest())
         self.assertEqual(self.output.stat().st_mode & 0o777, 0o600)
         create = next(c for c in self.calls if 'create' in c)
-        self.assertEqual(create, ['docker', 'compose', '-f', str(self.compose), 'exec', '-T',
-            'mattermost', '/mattermost/bin/mmctl', '--local', '--json', 'export', 'create',
+        self.assertEqual(create, ['docker', 'exec', self.container_id, '/mattermost/bin/mmctl', '--local', '--json', 'export', 'create',
             '--include-archived-channels'])
         self.assertFalse(any('delete' in c for c in self.calls))
-        remove = next(c for c in self.calls if 'rm' in c)
-        self.assertTrue(remove[-1].startswith('/tmp/mm-archiver-'))
+        self.assertFalse(any('rm' in c or 'rmdir' in c for c in self.calls))
+        self.assertEqual(len(state['temporary_directories']), 1)
+        self.assertIn(state['temporary_directories'][0], self.stderr.getvalue())
         self.assertEqual(list(self.root.glob('.mm-export-*')), [])
+
+    def test_ambiguous_container_user_refused_before_create(self):
+        for user in ('', '2000', 'mattermost', '2000:group', '1:2;SECRET', '99999999999:0'):
+            self.container_user = user
+            self.calls.clear()
+            self.assertEqual(self.execute(), 1)
+            self.assertFalse(any('create' in c or 'cp' in c for c in self.calls))
+        self.assertNotIn('SECRET', self.stderr.getvalue())
+
+    def test_multiple_containers_refused(self):
+        self.container_id = 'b' * 64 + '\n' + 'c' * 64
+        self.assertEqual(self.execute(), 1)
+        self.assertFalse(any('inspect' in c or 'create' in c for c in self.calls))
+
+    def test_resume_keeps_all_private_staging_paths(self):
+        self.copy_error = True
+        self.assertEqual(self.execute(), 1)
+        self.copy_error = False
+        self.assertEqual(self.execute(), 0)
+        paths = json.loads(self.state.read_text())['temporary_directories']
+        self.assertEqual(len(set(paths)), 2)
+
+    def test_download_and_host_copy_failure_private_cleanup(self):
+        for attr in ('download_error', 'host_copy_error'):
+            setattr(self, attr, True)
+            self.assertEqual(self.execute(), 1)
+            self.assertFalse(self.output.exists())
+            self.assertEqual(list(self.root.glob('.mm-export-*')), [])
+            self.assertNotIn('SECRET', self.stderr.getvalue())
+            setattr(self, attr, False)
+        self.assertEqual(self.execute(), 0)
+        self.assertEqual(sum('create' in c for c in self.calls), 1)
+
+    def test_invalid_staging_history_fails_without_docker(self):
+        self.copy_error = True
+        self.assertEqual(self.execute(), 1)
+        state = json.loads(self.state.read_text())
+        state['temporary_directories'] = 'SECRET'
+        self.state.write_text(json.dumps(state))
+        self.calls.clear()
+        self.assertEqual(self.execute(), 1)
+        self.assertFalse(self.calls)
+        self.assertNotIn('SECRET', self.stderr.getvalue())
 
     def test_acknowledgment_required(self):
         args = self.args()
@@ -103,7 +171,7 @@ class ExportTests(unittest.TestCase):
 
     def test_read_only_preflight(self):
         self.assertEqual(self.execute(self.args('--preflight')), 0)
-        self.assertEqual(len(self.calls), 2)
+        self.assertEqual(len(self.calls), 3)
         self.assertFalse(self.state.exists())
 
     def test_ambiguous_create_does_not_repeat_and_can_recover(self):

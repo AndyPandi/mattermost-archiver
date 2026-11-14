@@ -38,14 +38,23 @@ umask 077
 mkdir -p ~/archive-work
 chmod 700 ~/archive-work
 JOB_ID="REPLACE_WITH_JOB_ID"
-REMOTE_DIR="/tmp/archive-$JOB_ID"
-sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost mkdir -m 700 "$REMOTE_DIR"
+REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+SEED_PARENT="$(mktemp -d)"
+mkdir -m 700 "$SEED_PARENT/private"
+# Pinned deployment Compose user only; NOT a generic Mattermost UID/GID.
+sudo chown 2000:2000 "$SEED_PARENT/private"
+sudo docker compose -f /opt/mattermost/compose.yaml cp -a \
+  "$SEED_PARENT/private" "mattermost:$REMOTE_DIR"
 sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost /mattermost/bin/mmctl --local export download "${JOB_ID}_export.zip" "$REMOTE_DIR/raw.zip"
-sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" ~/archive-work/raw.zip
-sudo chown "$(id -u):$(id -g)" ~/archive-work/raw.zip
-chmod 600 ~/archive-work/raw.zip
+LOCAL_DIR="$(mktemp -d ~/archive-work/mm-download-XXXXXXXX)"
+sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" "$LOCAL_DIR/raw.zip"
+sudo chown "$(id -u):$(id -g)" "$LOCAL_DIR/raw.zip"
+chmod 600 "$LOCAL_DIR/raw.zip"
+ln "$LOCAL_DIR/raw.zip" ~/archive-work/raw.zip
 python3 -m zipfile -t ~/archive-work/raw.zip
 ```
+컨테이너에 mkdir/sh/id/chmod/rm 등이 있다고 가정하지 않습니다. 위 mkdir/chown은 **호스트** 명령이며, 2000:2000은 해당 고정 Compose 배포에서 확인한 사용자에만 적용합니다. 다른 배포는 관리자가 UID:GID를 확인해야 합니다. Docker cp -a는 원본 소유권과 권한을 유지합니다. UUID 경로는 매번 새로 만들고 재사용하지 마세요. 각 명령 실패 시 즉시 중단하세요. ln은 기존 출력을 덮어쓰지 않습니다. 컨테이너의 0700 임시 폴더는 민감한 ZIP을 보호하며 자동 삭제하지 않습니다. 경로를 기록해 보존 정책에 따라 처리하고 서버 원본 export는 삭제하지 마세요. 호스트 임시 폴더도 보존 정책 대상입니다. 컨테이너 /tmp 여유 공간은 관리자가 별도로 확인해야 합니다.
+
 
 ZIP 검사에서 오류가 없어야 합니다. `umask 077`은 새 파일을 본인만 접근하도록 하는 기본 권한 설정입니다. 위 과정에서 만든 컨테이너 임시 사본은 자동 삭제되지 않습니다.
 
@@ -128,3 +137,5 @@ scp -i "<SSH_PRIVATE_KEY>" opc@<SERVER_IP>:/home/opc/archive-work/archive.zip .
 이 프로젝트의 코드와 문서는 [MIT License](LICENSE)를 따릅니다. 저작권·허가 고지를 유지하면 상업적 사용, 수정 및 재배포가 가능합니다. 무보증으로 제공됩니다.
 
 Mattermost 자체와 타사 구성요소는 각각의 라이선스를 따릅니다. 추출된 대화·첨부파일에 MIT 라이선스가 자동으로 적용되는 것은 아닙니다.
+
+Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.

@@ -68,7 +68,7 @@ df -h .
 
 ## 3. 관리자 수동 추출 (새 OCI VM 기본 경로)
 
-**서버 전체 데이터 추출에 대한 명시적 승인을 받은 뒤에만 실행하세요.** 공개 채널만 변환해도 추출 자체는 전체 서버 범위입니다. 각 명령의 성공을 확인하고 실패하면 중단하세요. 일반 사용자 SSH 셸에서 아래 Docker 명령에만 sudo를 사용합니다. 새 OCI VM은 /opt/mattermost가 root 소유 0700이고 compose 파일은 0600이며 opc는 docker 그룹에 속하지 않습니다. 권한 오류를 우회하려고 디렉터리·env·compose 권한을 완화하거나 Docker 소켓/그룹 권한을 변경하지 마세요. 아래 chown은 새 임시 폴더의 다운로드 파일 하나만 일반 사용자에게 넘깁니다. 이후 list/convert/verify는 sudo 없이 실행하세요.
+**서버 전체 데이터 추출에 대한 명시적 승인을 받은 뒤에만 실행하세요.** 공개 채널만 변환해도 추출 자체는 전체 서버 범위입니다. 각 명령의 성공을 확인하고 실패하면 중단하세요. 일반 사용자 SSH 셸에서 아래 Docker 및 지정한 chown 명령에만 sudo를 사용합니다. 새 OCI VM은 /opt/mattermost가 root 소유 0700이고 compose 파일은 0600이며 opc는 docker 그룹에 속하지 않습니다. 권한 오류를 우회하려고 디렉터리·env·compose 권한을 완화하거나 Docker 소켓/그룹 권한을 변경하지 마세요. 아래 chown은 새 임시 폴더의 다운로드 파일 하나만 일반 사용자에게 넘깁니다. 이후 list/convert/verify는 sudo 없이 실행하세요.
 
 Docker 호스트에서 실행합니다. 설치된 `mmctl --local export --help`로 문법을 확인하세요. `JOB_ID`와 `ID_export.zip`은 실제 응답 값으로 바꿉니다.
 
@@ -85,8 +85,12 @@ sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
 
 # 목록에 표시된 정확한 파일명을 사용합니다.
 REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
-sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  mkdir -m 700 "$REMOTE_DIR"
+SEED_PARENT="$(mktemp -d)"
+mkdir -m 700 "$SEED_PARENT/private"
+# Pinned deployment Compose user only; NOT a generic Mattermost UID/GID.
+sudo chown 2000:2000 "$SEED_PARENT/private"
+sudo docker compose -f /opt/mattermost/compose.yaml cp -a \
+  "$SEED_PARENT/private" "mattermost:$REMOTE_DIR"
 sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
   /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
 
@@ -101,6 +105,8 @@ ln "$LOCAL_DIR/raw.zip" ./raw.zip
 python3 -m zipfile -t raw.zip
 sha256sum raw.zip
 ```
+컨테이너에 mkdir/sh/id/chmod/rm 등이 있다고 가정하지 않습니다. 위 mkdir/chown은 **호스트** 명령이며, 2000:2000은 해당 고정 Compose 배포에서 확인한 사용자에만 적용합니다. 다른 배포는 관리자가 UID:GID를 확인해야 합니다. Docker cp -a는 원본 소유권과 권한을 유지합니다. UUID 경로는 매번 새로 만들고 재사용하지 마세요. 각 명령 실패 시 즉시 중단하세요. ln은 기존 출력을 덮어쓰지 않습니다. 컨테이너의 0700 임시 폴더는 민감한 ZIP을 보호하며 자동 삭제하지 않습니다. 경로를 기록해 보존 정책에 따라 처리하고 서버 원본 export는 삭제하지 마세요. 호스트 임시 폴더도 보존 정책 대상입니다. 컨테이너 /tmp 여유 공간은 관리자가 별도로 확인해야 합니다.
+
 
 작업 성공을 확인한 뒤 다운로드하세요. 실패하면 작업 오류와 서버 로그를 먼저 확인합니다. 컨테이너 재생성 시 임시 다운로드가 사라질 수 있습니다. 임시 복사본은 조직의 보존 절차에 따라 관리하세요. 위 명령은 원본 메시지나 서버 내보내기 파일을 삭제하지 않습니다.
 
@@ -226,8 +232,8 @@ python3 -m unittest discover -s tests -v
 - 카테고리 JSON은 평면 객체입니다: `{"engineering/town-square":"회사", "operations/incidents":"운영"}`. 개인 사이드바 설정은 export에 포함되지 않으므로 자동 복원하지 않습니다.
 - 공통 제한: `--max-bytes` 21474836480(압축 입력/전체 압축 해제 바이트), `--max-entries` 100000, `--max-ratio` 200, `--max-line-bytes` 16777216, `--max-records` 1000000.
 - 변환 제한: `--max-post-bytes` 268435456(선택 게시글 직렬화 크기), `--max-depth` 50, `--min-free-bytes` 1073741824. 출력 디스크에 전체 비압축 입력 크기의 3배 + 여유 공간을 요구합니다. Python 객체 메모리 및 HTML 증가량 때문에 정확한 RSS/최종 용량 보장은 아닙니다. ZIP 중앙 디렉터리는 할당 전 64 MiB 및 항목 수를 제한하지만 임의의 적대적 업로드 처리용으로 사용하지 마세요.
-- 추출 제한: `--poll-interval` 5초, `--poll-timeout` 3600초, `--command-timeout` 600초, `--min-free-bytes` 1073741824. 마지막 값은 호스트/컨테이너의 최소 여유 공간이지 export 크기 예측이 아닙니다.
-- state/lock 파일을 유지하여 재시도하세요. 생성 결과가 불명확한 state를 지우고 재시도하지 마세요. 게시 직후 중단되었다면 기존 ZIP을 state의 SHA-256과 비교하세요. 기존 출력은 완료된 경우에도 덮어쓰지 않습니다. 강제 종료는 임시 파일을 남길 수 있으며 원본 export를 일괄 정리하지 않습니다. POSIX flock, 동일 파일시스템 하드링크 및 컨테이너 df/mkdir/stat/rm/rmdir가 필요합니다.
+- 추출 제한: `--poll-interval` 5초, `--poll-timeout` 3600초, `--command-timeout` 600초, `--min-free-bytes` 1073741824. 마지막 값은 호스트만의 최소 여유 공간(컨테이너 용량은 별도 확인)이지 export 크기 예측이 아닙니다.
+- state/lock 파일을 유지하여 재시도하세요. 생성 결과가 불명확한 state를 지우고 재시도하지 마세요. 게시 직후 중단되었다면 기존 ZIP을 state의 SHA-256과 비교하세요. 기존 출력은 완료된 경우에도 덮어쓰지 않습니다. 강제 종료는 임시 파일을 남길 수 있으며 원본 export를 일괄 정리하지 않습니다. POSIX flock, 동일 파일시스템 하드링크, Docker archive-copy가 필요하며 컨테이너에서는 mmctl만 실행합니다. 자동 추출은 Config.User에 명시된 숫자 UID:GID가 필요하며 2000을 기본값으로 가정하지 않습니다. 임시 경로는 모두 state에 기록하고 컨테이너 사본은 삭제하지 않습니다.
 - `verify`는 해시, 크기, 파일 집합과 게시글/답글/채널/첨부 수를 확인합니다. manifest 자체는 서명이 아니며 원본의 완전성을 증명하지 않습니다.
 - 합성 테스트 통과만으로 Python 3.9 실제 런타임, OL9/macOS, 운영 서버 또는 브라우저 동작이 검증된 것은 아닙니다. 시간대 DB는 OS에 설치되어 있어야 합니다.
 
@@ -235,3 +241,5 @@ python3 -m unittest discover -s tests -v
 
 ### 첨부파일 이름
 저장 파일명은 `정규화된파일명__해시뒤8자리.확장자` 형태입니다. 해시는 파일 내용이 아닌 원본 ZIP 내부 경로의 SHA-256입니다. 대소문자를 구분하지 않는 파일명 충돌이 발생하면 12·16자리부터 최대 64자리까지 확장하며, 그래도 충돌하면 덮어쓰지 않고 실패합니다. HTML 표시 이름은 원래 이름을 유지하고 무결성 검증 해시는 전체 SHA-256을 사용합니다. 기존 아카이브는 자동 변경되지 않으므로 원본 export를 새 출력 ZIP으로 다시 변환하세요.
+
+Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.

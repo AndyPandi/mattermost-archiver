@@ -19,6 +19,8 @@ import stat
 import subprocess
 import sys
 import tempfile
+import tarfile
+import io
 import time
 import uuid
 
@@ -38,7 +40,7 @@ def add_parser(subparsers):
     p.add_argument('--dry-run', action='store_true', help='Local checks/plan only; no Docker or writes')
     p.add_argument('--preflight', action='store_true', help='Read-only Docker checks only; no job or state')
     p.add_argument('--min-free-bytes', type=int, default=1073741824,
-                   help='Minimum free host and container /tmp bytes; floor, NOT size estimate')
+                   help='Minimum free host bytes; check container space separately')
     p.add_argument('--poll-interval', type=float, default=5.0)
     p.add_argument('--poll-timeout', type=float, default=3600.0)
     p.add_argument('--command-timeout', type=float, default=600.0)
@@ -46,10 +48,10 @@ def add_parser(subparsers):
     return p
 
 
-def _run(command, timeout):
+def _run(command, timeout, input_data=None):
     try:
         result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                timeout=timeout, check=False)
+                                timeout=timeout, check=False, input=input_data)
     except subprocess.TimeoutExpired:
         raise ExportError('Docker command timed out; state retained. Resume with the same state.') from None
     except OSError:
@@ -159,22 +161,27 @@ def _execute(args):
     base = ['docker', 'compose', '-f', compose]
     container = base + ['exec', '-T', 'mattermost']
     mmctl = container + ['/mattermost/bin/mmctl', '--local', '--json']
-    def run(command, timeout=None):
-        return _run(command, args.command_timeout if timeout is None else timeout)
+    def run(command, timeout=None, input_data=None):
+        return _run(command, args.command_timeout if timeout is None else timeout, input_data)
     print('Full-server export includes private data and attachments; original server export is retained.')
     print('Disk budget is only a floor, not an export-size estimate. Allow server storage plus container /tmp plus host ZIP; these may share a disk.')
     if args.dry_run:
-        print('Dry run: preflight, create/adopt, poll, list, temporary download, compose cp, SHA-256, no-overwrite publish. No Docker calls or writes.')
+        print('Dry run: preflight, create/adopt, poll, list, private retained download, Docker cp, SHA-256, no-overwrite publish. No Docker calls or writes.')
         return 0
     def preflight():
         _json(run(mmctl + ['export', 'list']))  # Verify local access and JSON compatibility.
-        available = run(container + ['df', '-Pk', '/tmp']).splitlines()
-        try:
-            free = int(available[-1].split()[3]) * 1024
-        except (ValueError, IndexError):
-            raise ExportError('Unable to determine container /tmp free space.') from None
-        if free < args.min_free_bytes:
-            raise ExportError('Insufficient container /tmp disk space for configured budget.')
+        # Allowlist one field; never inspect environment or other secrets.
+        cid = run(base + ['ps', '-q', 'mattermost']).strip()
+        if not re.fullmatch('[a-f0-9]{12,64}', cid):
+            raise ExportError('Expected exactly one running Mattermost container.')
+        user = run(['docker', 'inspect', '--format', '{{.Config.User}}', cid]).strip()
+        if not re.fullmatch('[0-9]{1,10}:[0-9]{1,10}', user):
+            raise ExportError('Container Config.User must specify numeric UID:GID; use the manual workflow for other images.')
+        uid, gid = map(int, user.split(':'))
+        if max(uid, gid) > 2147483647:
+            raise ExportError('Container UID:GID is outside supported range.')
+        print('Container free space is not probed: verify /tmp capacity separately before extraction.')
+        return cid, uid, gid
     if args.preflight:
         preflight()
         print('Read-only preflight passed; no job created.')
@@ -193,6 +200,11 @@ def _execute(args):
                 raise ExportError('State does not match output/compose configuration.')
             if state.get('phase') not in ('creating', 'polling', 'download', 'publishing', 'complete'):
                 raise ExportError('Unknown state phase; refusing job creation.')
+        paths = state.get('temporary_directories', [])
+        if not isinstance(paths, list) or any(
+                not isinstance(path, str) or not re.fullmatch('/tmp/mm-archiver-[0-9a-f]{32}', path)
+                for path in paths):
+            raise ExportError('Invalid staging history in state; inspect locally.')
         ident = state.get('job_id')
         if ident and (not isinstance(ident, str) or not re.fullmatch('[a-z0-9]{26}', ident)):
             raise ExportError('Invalid stored job identity; refusing job creation.')
@@ -202,7 +214,8 @@ def _execute(args):
             ident = args.job_id
         if state.get('phase') and not ident:
             raise ExportError('Creation outcome unknown. Inspect export job list and recover with --job-id; never auto-retrying create.')
-        preflight()
+        cid, uid, gid = preflight()
+        mmctl = ['docker', 'exec', cid, '/mattermost/bin/mmctl', '--local', '--json']
         if not ident:
             state['phase'] = 'creating'
             _save(state_path, state)  # Durable BEFORE any possibly successful remote mutation.
@@ -238,22 +251,32 @@ def _execute(args):
         local_tmp = None
         made_remote = False
         try:
-            run(container + ['mkdir', '-m', '700', temporary])
+            # Archive API carries numeric ownership without host chown/root Python.
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode='w') as tar:
+                entry = tarfile.TarInfo(temporary[len('/tmp/'):])
+                entry.type = tarfile.DIRTYPE
+                entry.mode, entry.uid, entry.gid = 0o700, uid, gid
+                tar.addfile(entry)
+            state.setdefault('temporary_directories', []).append(temporary)
+            _save(state_path, state)
             made_remote = True
+            run(['docker', 'cp', '-a', '-', cid + ':/tmp'], input_data=archive.getvalue())
             run(mmctl + ['export', 'download', name, remote_file])
-            try:
-                size = int(run(container + ['stat', '-c', '%s', remote_file]).strip())
-            except ValueError:
-                raise ExportError('Cannot read temporary export size.') from None
-            if size <= 0:
-                raise ExportError('Refusing empty export.')
-            _disk(output.parent, size + args.min_free_bytes)
-            fd, local_tmp = tempfile.mkstemp(prefix='.mm-export-', dir=str(output.parent))
-            os.close(fd)
-            run(base + ['cp', 'mattermost:' + remote_file, local_tmp])
-            os.chmod(local_tmp, 0o600)
-            if os.path.getsize(local_tmp) != size:
-                raise ExportError('Copied export size mismatch.')
+            # Protect bytes even if cp preserves a world-readable file mode.
+            with tempfile.TemporaryDirectory(prefix='.mm-export-', dir=str(output.parent)) as staging:
+                local_tmp = str(Path(staging) / 'export.zip')
+                run(['docker', 'cp', cid + ':' + remote_file, local_tmp])
+                info = os.lstat(local_tmp)
+                if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+                    raise ExportError('Refusing non-regular or empty copied export.')
+                os.chmod(local_tmp, 0o600)
+                size = info.st_size
+                _disk(output.parent, args.min_free_bytes)
+                fd, saved = tempfile.mkstemp(prefix='.mm-export-', dir=str(output.parent))
+                os.close(fd)
+                os.replace(local_tmp, saved)
+                local_tmp = saved
             checksum = _hash(local_tmp)
             with open(local_tmp, 'rb') as stream:
                 os.fsync(stream.fileno())
@@ -271,12 +294,8 @@ def _execute(args):
             if local_tmp and os.path.exists(local_tmp):
                 os.unlink(local_tmp)
             if made_remote:
-                try:
-                    run(container + ['rm', '-f', remote_file])
-                    run(container + ['rmdir', temporary])
-                except ExportError:
-                    print('Warning: generated container temporary directory cleanup failed: ' + temporary,
-                          file=sys.stderr)
+                print('Retention notice: private container staging may remain (no container utilities used): '
+                      + temporary + '; recorded in state. Do not delete server export originals.', file=sys.stderr)
         return 0
 
 

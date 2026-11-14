@@ -38,14 +38,23 @@ umask 077
 mkdir -p ~/archive-work
 chmod 700 ~/archive-work
 JOB_ID="REPLACE_WITH_JOB_ID"
-REMOTE_DIR="/tmp/archive-$JOB_ID"
-sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost mkdir -m 700 "$REMOTE_DIR"
+REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+SEED_PARENT="$(mktemp -d)"
+mkdir -m 700 "$SEED_PARENT/private"
+# Pinned deployment Compose user only; NOT a generic Mattermost UID/GID.
+sudo chown 2000:2000 "$SEED_PARENT/private"
+sudo docker compose -f /opt/mattermost/compose.yaml cp -a \
+  "$SEED_PARENT/private" "mattermost:$REMOTE_DIR"
 sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost /mattermost/bin/mmctl --local export download "${JOB_ID}_export.zip" "$REMOTE_DIR/raw.zip"
-sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" ~/archive-work/raw.zip
-sudo chown "$(id -u):$(id -g)" ~/archive-work/raw.zip
-chmod 600 ~/archive-work/raw.zip
+LOCAL_DIR="$(mktemp -d ~/archive-work/mm-download-XXXXXXXX)"
+sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" "$LOCAL_DIR/raw.zip"
+sudo chown "$(id -u):$(id -g)" "$LOCAL_DIR/raw.zip"
+chmod 600 "$LOCAL_DIR/raw.zip"
+ln "$LOCAL_DIR/raw.zip" ~/archive-work/raw.zip
 python3 -m zipfile -t ~/archive-work/raw.zip
 ```
+No mkdir/sh/id/chmod/rm inside the container is assumed. mkdir/chown above run on the **host**; 2000:2000 applies only to the verified pinned Compose deployment. Have an administrator establish the correct UID:GID for other deployments. Docker cp -a preserves source ownership and permissions. Generate a fresh UUID path every time; never reuse it. Stop immediately if any command fails. ln refuses existing output. The container 0700 directory protects the sensitive ZIP and is retained, not automatically deleted: record its path and handle it under your retention policy without deleting server export originals. Host temporary directories also need retention management. An administrator must check container /tmp capacity separately.
+
 
 The ZIP test must report no errors. `umask 077` restricts newly created files to their owner by default. The container temporary copy is not automatically removed.
 
@@ -126,3 +135,5 @@ Attachment names use `sanitized-name__last8hash.ext`, extending the suffix on co
 Project code and documentation are licensed under the [MIT License](LICENSE). Commercial use, modification and redistribution are permitted subject to retaining the copyright and permission notice. Provided without warranty.
 
 Mattermost and third-party components retain their own licenses. Exported conversations and attachments do not automatically become MIT-licensed.
+
+Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.

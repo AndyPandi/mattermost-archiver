@@ -13,7 +13,10 @@ Python 3.9+ standard-library CLI separates privileged full-server extraction fro
 - Korean-default README.md and English README.en.md five-step extraction-to-browser quick starts and separate detailed manuals; synthetic adversarial and mocked export tests.
 
 - Consumed input shapes/scalars and selected recursive reply scope are validated with payload-free ArchiveError failures before publication; nullable optional Go export fields remain accepted. Selection UNION/private opt-in behavior is explicit in help/manuals and regression-tested.
-- Detailed bilingual manuals default to administrator manual extraction and unprivileged conversion for restricted OCI permissions; public downloads, prerequisites, cross-platform viewing and active attachment/integrity limitations are documented. Local synthetic suite: 44 tests (8 new methods); actual VM/live export remains unvalidated.
+- Detailed bilingual manuals default to administrator manual extraction and unprivileged conversion for restricted OCI permissions; public downloads, prerequisites, cross-platform viewing and active attachment/integrity limitations are documented. Local synthetic suite: 49 tests; actual VM/live export remains unvalidated.
+
+- Automated staging uses a numeric UID:GID from only the scoped container Config.User field, never a generic 2000 default. Missing/named/UID-only identities fail before creation. Docker cp -a receives a host-generated 0700 directory tar; subsequent operations pin the inspected container ID.
+- Container staging is retained and recorded in state (including retries); no remote delete is attempted. Host staging is private and publication remains no-overwrite. Container capacity must be verified separately; the free-space option covers host only. Docker is unavailable in the development environment, so archive-copy behavior is documentation-backed and mocked, not live-validated.
 
 ## Current priorities
 Independent review and authorized representative deployment validation before production use.
@@ -23,7 +26,7 @@ Independent review and authorized representative deployment validation before pr
 - Plain text Markdown; plugins/polls, custom emoji images, user profile metadata, roles and sidebar categories not reconstructed. Not a complete backup.
 - Default 256 MiB selected-post serialized budget is not an RSS cap; ZIP central directory has a preallocation 64 MiB cap; the guard uses Python zipfile internal EOCD helpers. Filesystem checks are estimates, not quota reservations.
 - Tested locally under Python 3.12 with Python 3.9 syntax validation, not live Mattermost, OL9/macOS or browser integration.
-- Requires OS timezone database, POSIX locking/hardlinks and Docker/container utilities for live extraction.
+- Requires OS timezone database, POSIX locking/hardlinks and Docker archive-copy support and mmctl for live extraction; no container shell/coreutils required.
 - Manifest is integrity evidence, not a digital signature. User content/attachments can contain secrets and active content remains dangerous if opened separately.
 
 ## Technical debt and roadmap
