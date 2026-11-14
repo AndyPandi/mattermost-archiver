@@ -15,30 +15,30 @@ EMOJI_ALIASES = {
 
 
 CHAT_CSS = """
-:root{color-scheme:light;--ink:#243247;--muted:#617087;--line:#e6eaf0;--accent:#3864b8}
+:root{color-scheme:light;--lavender:#A89BBE;--beige:#D8C3A8;--ink:#302b38;--muted:#645b69;--line:#e6dfd6;--accent:#65517e}
 
 *{box-sizing:border-box}
 html{scroll-padding-top:24px}
-body{margin:0;background:#f5f7fb;color:var(--ink);font:15px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}
+body{margin:0;background:#f8f5f0;color:var(--ink);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif}
 a{color:var(--accent);text-decoration:none}
 a:hover{text-decoration:underline}
-a:focus-visible,summary:focus-visible{outline:3px solid #8db3ff;outline-offset:3px}
+a:focus-visible,summary:focus-visible{outline:3px solid #806b9b;outline-offset:3px}
 h1,h2,p{margin:0}
 h1{font-size:25px;letter-spacing:-.6px}
 h2{font-size:21px}
 small,time,.meta{color:var(--muted)}
 time{font-size:12px}
 .layout{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100vh}
-.sidebar{background:#1e2b43;color:#dce5f6;padding:30px 18px;position:sticky;top:0;height:100vh;overflow:auto}
+.sidebar{background:#eee8f2;color:#302b38;padding:30px 18px;position:sticky;top:0;height:100vh;overflow:auto}
 .brand{font-size:19px;font-weight:750;padding:0 10px 27px}
-.brand-icon{display:inline-grid;place-items:center;background:#6389df;color:white;border-radius:10px;width:32px;height:32px;margin-right:7px}
-.archive-label{display:block;font-size:10px;letter-spacing:2px;color:#aabbd7;margin-top:12px}
-.team-name{font-size:12px;color:#b9c8df;letter-spacing:1px;padding:22px 10px 8px;overflow-wrap:anywhere}
-.channel-link{display:flex;gap:8px;align-items:baseline;border-radius:7px;padding:9px 12px;color:#e2eaf8;overflow-wrap:anywhere}
-.channel-link:hover{background:#30425f;text-decoration:none}
-.channel-link>span{color:#91a6c8}
-.channel-link small{margin-left:auto;color:#b9c8df}
-.sidebar-note{font-size:11px;color:#b9c8df;margin:36px 10px}
+.brand-icon{display:inline-grid;place-items:center;background:var(--lavender);color:#302b38;border-radius:10px;width:32px;height:32px;margin-right:7px}
+.archive-label{display:block;font-size:10px;letter-spacing:2px;color:#645b69;margin-top:12px}
+.team-name{font-size:12px;color:#645b69;letter-spacing:1px;padding:22px 10px 8px;overflow-wrap:anywhere}
+.channel-link{display:flex;gap:8px;align-items:baseline;border-radius:7px;padding:9px 12px;color:#40364d;overflow-wrap:anywhere}
+.channel-link:hover{background:#e0d6e9;text-decoration:none}
+.channel-link>span{color:#776487}
+.channel-link small{margin-left:auto;color:#645b69}
+.sidebar-note{font-size:11px;color:#645b69;margin:36px 10px}
 main{min-width:0;max-width:1250px;width:100%;margin:auto;padding:32px 46px}
 .topbar{display:flex;justify-content:space-between;gap:16px;align-items:center;margin-bottom:22px}
 .eyebrow{font-size:10px;font-weight:700;letter-spacing:1.5px;color:var(--muted)}
@@ -49,19 +49,19 @@ section{background:white;border:1px solid var(--line);border-radius:14px;margin-
 .channel-header{padding:24px 28px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
 .channel-header h2{margin:4px 0}
 .channel-header p{font-size:12px;color:var(--muted)}
-.channel-header:target{background:#eef4ff}
+.channel-header:target{background:#f2edf6}
 .timeline{padding:6px 28px 26px}
 .day-separator{display:flex;align-items:center;gap:14px;margin:23px 0}
 .day-separator:before,.day-separator:after{content:"";height:1px;background:var(--line);flex:1}
 .day-separator time{border:1px solid var(--line);border-radius:20px;padding:3px 14px;font-weight:600;background:white}
 .post,.reply{display:flex;gap:13px;padding:15px 0}
 .avatar{flex:0 0 38px;height:38px;border-radius:12px;display:grid;place-items:center;font-size:13px;font-weight:750;overflow:hidden}
-.color-0{background:#e6eaff;color:#485eab}
-.color-1{background:#dff1ea;color:#2c7863}
-.color-2{background:#ffebdd;color:#9c572c}
-.color-3{background:#f0e5f8;color:#8551a1}
-.color-4{background:#deeff8;color:#386e91}
-.color-5{background:#f9e3e9;color:#9e4f66}
+.color-0{background:#e7dff0;color:#57436f}
+.color-1{background:#eee4d7;color:#66513b}
+.color-2{background:#f0e8df;color:#72563c}
+.color-3{background:#e8e0ed;color:#654c78}
+.color-4{background:#e4dce9;color:#5c4c70}
+.color-5{background:#f2e7dd;color:#79573f}
 .message{min-width:0;flex:1}
 .message header{display:flex;flex-wrap:wrap;gap:5px 10px;align-items:baseline;font-size:14px;overflow-wrap:anywhere}
 .message header strong{font-weight:700}
@@ -69,17 +69,17 @@ section{background:white;border:1px solid var(--line);border-radius:14px;margin-
 .pin{font-size:10px;color:#8c6921;background:#fff3ce;border-radius:4px;padding:1px 6px}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;margin:5px 0 9px;line-height:1.7}
 pre:empty{display:none}
-.attachment{border:1px solid var(--line);background:#f8faff;border-radius:9px;padding:12px 15px;margin:12px 0;max-width:480px;overflow-wrap:anywhere}
+.attachment{border:1px solid var(--line);background:#faf7f2;border-radius:9px;padding:12px 15px;margin:12px 0;max-width:480px;overflow-wrap:anywhere}
 .attachment a{font-weight:600}
 .attachment p{font-size:10px;color:var(--muted);margin-top:4px}
 .reactions{display:flex;flex-wrap:wrap;gap:7px;margin:9px 0}
 .reaction{max-width:100%;font-size:12px}
-.reaction summary{display:inline-flex;align-items:center;gap:7px;border:1px solid #dce6f7;background:#f1f6ff;border-radius:18px;padding:3px 10px;cursor:pointer;overflow-wrap:anywhere}
+.reaction summary{display:inline-flex;align-items:center;gap:7px;border:1px solid #d7cbe3;background:#f0eaf5;border-radius:18px;padding:3px 10px;cursor:pointer;overflow-wrap:anywhere}
 .reaction summary::-webkit-details-marker{display:none}
 .reaction summary span[role]{font-size:17px}
-.reaction ul{margin:8px 0;padding:10px 12px 10px 28px;background:#f7f9fc;border-radius:8px;overflow-wrap:anywhere}
+.reaction ul{margin:8px 0;padding:10px 12px 10px 28px;background:#f6f1f8;border-radius:8px;overflow-wrap:anywhere}
 .thread-toggle{cursor:pointer;color:var(--accent);font-size:12px;font-weight:600;margin:12px 0}
-.thread{border-left:2px solid #dfe8f7;padding-left:16px;background:#fafbfe;border-radius:0 8px 8px 0}
+.thread{border-left:2px solid var(--beige);padding-left:16px;background:#faf7f2;border-radius:0 8px 8px 0}
 .reply{padding-right:12px}
 .reply .avatar{flex-basis:30px;height:30px;border-radius:9px;font-size:11px}
 .empty-state{text-align:center;padding:48px 10px;color:var(--muted)}

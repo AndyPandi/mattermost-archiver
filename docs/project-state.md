@@ -38,3 +38,5 @@ Potential future work needs separate scope: streaming disk-backed post indexing,
 
 - Responsive offline chat layout includes team/channel anchors, deterministic initials/color avatars, day separators, exact ISO time metadata, native nested replies and attachment download cards. Unicode reaction chips count unique exact users across synonymous aliases; all original reaction records remain in accessible details.
 - v1 manifest/count markers remain unchanged; synthetic old d9a7bbd archives verify with the new code and new archives verify with d9a7bbd. Browser visual review was attempted but blocked by no supported installed browser; no screenshot available.
+
+- Presentation palette: lavender #A89BBE and beige #D8C3A8, pale surfaces with dark text, 16px body and 1.65 line height. Synthetic downloadable HTML preview prepared; browser rendering remains unverified.
