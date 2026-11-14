@@ -14,26 +14,38 @@
 - 플러그인 데이터·투표의 보존을 보장하지 않습니다. Markdown은 Mattermost처럼 완전하게 렌더링하지 않고 이스케이프된 일반 텍스트로 표시합니다. 모든 서버 객체를 완전하게 재현하는 형식이 아닙니다.
 - HTML/SVG 등 신뢰할 수 없는 첨부파일은 인라인 표시하지 않고 다운로드 링크로만 제공합니다. 다운로드한다고 안전해지는 것은 아닙니다. 다른 프로그램에서 열면 위험할 수 있습니다.
 
-## 1. 비공개 저장소와 실행 환경 준비
+## 1. 공개 다운로드와 준비 사항
 
-Python 3.9 이상, Git, 충분한 저장 공간과 해당 Docker 배포에 대한 접근 권한이 필요합니다. 권한이 있는 SSH 키로 비공개 저장소를 복제합니다.
+Python 3.9 이상과 OS 시간대 DB가 필요합니다. 새 OCI/Oracle Linux VM에는 Git/wget/unzip이 없을 수 있습니다. 먼저 확인하세요(설치 명령은 자동 실행되지 않으며 관리자가 선택하여 실행합니다).
 
 ```sh
-git clone git@github.com:AndyPandi/mattermost-archiver.git
-cd mattermost-archiver
 python3 --version
+command -v git; command -v wget; command -v curl
+# Optional on Oracle Linux 9 only; use your OS package manager elsewhere:
+# sudo dnf install python3 git curl tzdata
+```
+
+공개 저장소는 로그인 없이 HTTPS로 복제합니다. 기존 경로를 덮어쓰지 말고 새 디렉터리를 사용하세요.
+
+```sh
+cd ~
+git clone https://github.com/AndyPandi/mattermost-archiver.git
+cd mattermost-archiver
 python3 mattermost_archiver.py --help
 ```
 
-GitHub CLI가 설치되어 있다면 대화형 인증을 사용하는 방법도 있습니다.
+Git이 없다면 wget 또는 curl 중 하나를 선택합니다. unzip 대신 Python 표준 라이브러리를 사용합니다.
 
 ```sh
-gh auth login
-gh repo clone AndyPandi/mattermost-archiver
-cd mattermost-archiver
+cd ~
+wget -O mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+# Alternative: choose ONE downloader
+# curl -fL -o mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+python3 -m zipfile -e mattermost-archiver-main.zip archiver-source
+cd ~/archiver-source/mattermost-archiver-main
 ```
 
-토큰·비밀번호·개인 키를 복제 URL, 스크립트, 아카이브, 커밋 파일에 넣지 마세요. 서버와 Mac에서는 같은 저장소 리비전을 사용하세요.
+**비공개 저장소 대안:** 익명 다운로드가 실패하면 GitHub 로그인 후 Code → Download ZIP으로 받고 서버로 전송하거나, 승인된 SSH 키로 복제하세요. URL에 토큰·키를 넣지 마세요. main은 변경될 수 있으므로 검토한 커밋을 기록·고정하고 실행 전 코드를 확인하세요. 다운로드를 셸에 바로 연결하지 마세요.
 
 아래 예시는 Compose 서비스 `mattermost`, 설정 파일 `/opt/mattermost/compose.yaml`, 서버에 포함된 실행 파일 `/mattermost/bin/mmctl`을 가정합니다. 실제 배포에 맞게 바꾸고, 서버와 함께 제공된 mmctl의 도움말로 버전별 문법을 확인하세요.
 
@@ -52,9 +64,49 @@ df -h .
 
 예시는 현재 디렉터리에 결과물을 생성합니다. 결과물이 Git에 들어가지 않도록 하거나, 접근이 제한된 별도 작업 디렉터리를 절대 경로로 지정하세요.
 
-서버 생성 내보내기, 컨테이너 다운로드, 호스트 원본 ZIP, 변환 임시 파일, 결과 ZIP, Mac의 ZIP 및 압축 해제본 공간이 필요합니다. 여러 복사본이 동시에 존재할 수 있습니다. 원본 ZIP 크기의 몇 배라는 계산은 **대략적인 추정일 뿐 보장이 아닙니다**. 압축 크기만으로 해제 후 크기를 정확히 알 수 없습니다. 서버 내보내기 저장소, 컨테이너 저장소, 임시 공간, 호스트 출력 공간과 Mac 공간을 각각 확인하세요. 첨부파일이 대부분을 차지할 수 있습니다.
+서버 생성 내보내기, 컨테이너 다운로드, 호스트 원본 ZIP, 변환 임시 파일, 결과 ZIP, 로컬 PC의 ZIP 및 압축 해제본 공간이 필요합니다. 여러 복사본이 동시에 존재할 수 있습니다. 원본 ZIP 크기의 몇 배라는 계산은 **대략적인 추정일 뿐 보장이 아닙니다**. 압축 크기만으로 해제 후 크기를 정확히 알 수 없습니다. 서버 내보내기 저장소, 컨테이너 저장소, 임시 공간, 호스트 출력 공간과 로컬 PC 공간을 각각 확인하세요. 첨부파일이 대부분을 차지할 수 있습니다.
 
-## 3. 운영 서버에서 추출
+## 3. 관리자 수동 추출 (새 OCI VM 기본 경로)
+
+**서버 전체 데이터 추출에 대한 명시적 승인을 받은 뒤에만 실행하세요.** 공개 채널만 변환해도 추출 자체는 전체 서버 범위입니다. 각 명령의 성공을 확인하고 실패하면 중단하세요. 일반 사용자 SSH 셸에서 아래 Docker 명령에만 sudo를 사용합니다. 새 OCI VM은 /opt/mattermost가 root 소유 0700이고 compose 파일은 0600이며 opc는 docker 그룹에 속하지 않습니다. 권한 오류를 우회하려고 디렉터리·env·compose 권한을 완화하거나 Docker 소켓/그룹 권한을 변경하지 마세요. 아래 chown은 새 임시 폴더의 다운로드 파일 하나만 일반 사용자에게 넘깁니다. 이후 list/convert/verify는 sudo 없이 실행하세요.
+
+Docker 호스트에서 실행합니다. 설치된 `mmctl --local export --help`로 문법을 확인하세요. `JOB_ID`와 `ID_export.zip`은 실제 응답 값으로 바꿉니다.
+
+```sh
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export create --include-archived-channels
+
+# 응답의 작업 ID를 기록하고 성공 여부를 확인합니다.
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export job show JOB_ID
+
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export list
+
+# 목록에 표시된 정확한 파일명을 사용합니다.
+REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  mkdir -m 700 "$REMOTE_DIR"
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
+
+umask 077
+LOCAL_DIR="$(mktemp -d ./mm-manual-XXXXXXXX)"
+sudo docker compose -f /opt/mattermost/compose.yaml cp \
+  "mattermost:$REMOTE_DIR/export.zip" "$LOCAL_DIR/raw.zip"
+sudo chown "$(id -u):$(id -g)" "$LOCAL_DIR/raw.zip"
+chmod 600 "$LOCAL_DIR/raw.zip"
+# ln refuses an existing raw.zip; retain temporary files if any command fails.
+ln "$LOCAL_DIR/raw.zip" ./raw.zip
+python3 -m zipfile -t raw.zip
+sha256sum raw.zip
+```
+
+작업 성공을 확인한 뒤 다운로드하세요. 실패하면 작업 오류와 서버 로그를 먼저 확인합니다. 컨테이너 재생성 시 임시 다운로드가 사라질 수 있습니다. 임시 복사본은 조직의 보존 절차에 따라 관리하세요. 위 명령은 원본 메시지나 서버 내보내기 파일을 삭제하지 않습니다.
+
+### 고급 선택 사항: 자동 추출과 재개
+
+다음 Python export 흐름은 **이미 실제 Docker 데몬과 보호된 compose/env 파일에 접근하도록 허가된 사용자만** 사용합니다. 새 OCI VM의 일반 opc 사용자에게 해당 권한이 있다고 가정하지 마세요. 기본 경로는 위 관리자 수동 추출입니다. sudo Python을 권장하지 않습니다. root로 실행하면 다운로드한 mattermost_archiver.py뿐 아니라 import되는 export_live.py도 root로 실행됩니다. 불가피한 관리자 운영은 검토·고정한 리비전의 전체 소스와 import 경로를 root 소유의 일반 사용자 쓰기 불가 위치에 두고, 작업 디렉터리·상태·출력 파일도 보호해야 합니다. 일반 사용자가 수정 가능한 checkout에서 root Python을 실행하지 마세요.
 
 설치된 명령의 옵션을 확인한 뒤 실행 계획을 살펴봅니다.
 
@@ -88,39 +140,6 @@ python3 mattermost_archiver.py export \
 
 작업 ID와 내보내기 파일명은 다릅니다. 완료된 작업을 mmctl 목록의 해당 파일과 대조하세요. 보존 정책으로 파일이 만료되었다면 재개로 복구할 수 없으므로 권한을 확인하고 새로 추출해야 합니다.
 
-### 수동 추출 대안
-
-Docker 호스트에서 실행합니다. 설치된 `mmctl --local export --help`로 문법을 확인하세요. `JOB_ID`와 `ID_export.zip`은 실제 응답 값으로 바꿉니다.
-
-```sh
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export create --include-archived-channels
-
-# 응답의 작업 ID를 기록하고 성공 여부를 확인합니다.
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export job show JOB_ID
-
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export list
-
-# 목록에 표시된 정확한 파일명을 사용합니다.
-REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  mkdir -m 700 "$REMOTE_DIR"
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
-
-LOCAL_DIR="$(mktemp -d ./mm-manual-XXXXXXXX)"
-docker compose -f /opt/mattermost/compose.yaml cp \
-  "mattermost:$REMOTE_DIR/export.zip" "$LOCAL_DIR/raw.zip"
-chmod 600 "$LOCAL_DIR/raw.zip"
-# ln refuses an existing raw.zip; retain temporary files if any command fails.
-ln "$LOCAL_DIR/raw.zip" ./raw.zip
-sha256sum raw.zip
-```
-
-작업 성공을 확인한 뒤 다운로드하세요. 실패하면 작업 오류와 서버 로그를 먼저 확인합니다. 컨테이너 재생성 시 임시 다운로드가 사라질 수 있습니다. 임시 복사본은 조직의 보존 절차에 따라 관리하세요. 위 명령은 원본 메시지나 서버 내보내기 파일을 삭제하지 않습니다.
-
 ## 4. 목록 확인 및 대화 선택
 
 ```sh
@@ -147,56 +166,42 @@ python3 mattermost_archiver.py convert raw.zip --output archive.zip \
 
 비공개 채널은 기본적으로 제외합니다. 권한이 있고 실제로 포함하려는 경우에만 명시적인 팀·채널 선택에 `--include-private`를 추가하세요. 비공개 채널 이름을 지정하는 것만으로 포함 동의를 대신할 수 없습니다. `--all-public`이 비공개 채널까지 포함한다고 해석하지 마세요. 어떤 옵션을 써도 개인·그룹 DM은 지원하지 않습니다.
 
+**선택은 교집합이 아니라 합집합(UNION)입니다.** --team, --channel, --all-public을 함께 쓰면 각각의 범위가 추가됩니다. --team engineering --channel engineering/town-square는 한 채널로 좁히지 않습니다. --include-private를 추가하면 명시적으로 선택한 팀의 모든 비공개 채널도 포함될 수 있습니다. --all-public 단독에 --include-private만 더하면 비공개 채널을 추가하지 않습니다.
+
+공개 채널 하나만 선택하려면 다른 선택 플래그를 붙이지 마세요:
+
+```sh
+python3 mattermost_archiver.py convert raw.zip --output one-channel.zip --channel engineering/town-square
+```
+
 선택 옵션 `--categories mapping.json`으로 카테고리 묶음을 지정할 수 있습니다. 체크아웃한 구현에서 지원하는 매핑 스키마를 사용하세요. 카테고리는 열람 편의 기능이며 Mattermost의 사용자별 사이드바 상태를 복구하는 기능이 아닙니다. 추출·선택에 필수는 아닙니다.
 
 `--timezone Asia/Seoul`은 표시 시간대이며 원본 타임스탬프를 바꾸지 않습니다. 실행 호스트의 시스템 시간대 데이터베이스에 요청한 IANA 시간대가 있어야 합니다. 데이터베이스가 없다면 해결한 뒤 진행하고 다른 시간대로 조용히 대체하지 마세요.
 
 변환 요약·보고서에서 선택 결과, 건너뛴 개인·그룹 DM, 미지원 레코드, 누락 첨부파일과 한도 도달 여부를 확인하세요. 처리에는 자원 사용 한도가 있습니다. 설정 가능한 항목과 기본값은 `convert --help`를 확인하세요. 신뢰하는 입력에 한해 저장 공간·메모리를 확인한 뒤 한도를 조정하세요. 한도가 모든 악성 ZIP에 대한 안전을 보장하지는 않습니다. 불완전한 변환을 완전한 백업으로 취급하지 마세요.
 
-## 5. 검증 후 Mac으로 전송
+## 5. 검증과 PC 전송 (Windows/macOS/Linux)
 
-서버에서 검증하고 SHA-256을 확인합니다.
+서버의 일반 사용자로 검증합니다. SHA-256은 무결성이지 진위·안전성 또는 완전성 보장이 아닙니다. ZIP과 해시를 모두 바꾸면 탐지할 수 없으므로 신뢰할 수 있는 경로로 해시를 기록하세요.
 
 ```sh
 python3 mattermost_archiver.py verify archive.zip
 sha256sum archive.zip
 ```
 
-해시 값을 신뢰할 수 있는 경로로 기록하세요. Mac에서는 SSH 호스트·절대 경로를 실제 값으로 바꿉니다.
+PC의 터미널에서 SSH 호스트·경로를 바꿔 실행하세요. 대상 파일이 없는 새 로컬 폴더를 사용하세요.
 
 ```sh
-mkdir -p ~/MattermostArchives
-chmod 700 ~/MattermostArchives
-cd ~/MattermostArchives
 scp user@server:/absolute/path/archive.zip ./archive.zip
-shasum -a 256 archive.zip
 ```
 
-서버와 Mac 해시가 정확히 같아야 합니다. 해시 비교는 전송 일치 여부를 확인할 뿐, 공격자가 ZIP과 해시를 함께 바꿀 수 있는 상황에서 진위를 보장하지 않습니다. 내부 검증은 매니페스트에 따른 구조·무결성을 확인하며 원본 서버 데이터를 모두 추출했음을 증명하지 않습니다.
+해시 비교: Linux는 `sha256sum archive.zip`, macOS는 `shasum -a 256 archive.zip`, Windows PowerShell은 `Get-FileHash archive.zip -Algorithm SHA256`을 사용하세요. Linux/macOS에서 Python 3.9+와 같은 소스 리비전이 있으면 로컬에서도 verify할 수 있습니다. Windows CLI 실행은 검증하지 않았습니다. 실패하면 다시 전송하고 해시를 수동으로 고치지 마세요.
 
-Mac에도 위 안내에 따라 같은 저장소 리비전을 복제하고 Python 3.9 이상으로 검증합니다.
+## 6. 로컬 압축 해제 및 열람
 
-```sh
-python3 /absolute/path/mattermost-archiver/mattermost_archiver.py verify \
-  ~/MattermostArchives/archive.zip
-```
+민감한 원본 raw.zip이 아닌 **변환된 archive.zip**을 OS 압축 해제 기능으로 새 폴더에 풀고 index.html을 브라우저에서 여세요. Python이 있으면 unzip 없이 `python3 -m zipfile -e archive.zip archive-view`도 가능합니다. 열람에는 Python이나 Mattermost가 필요하지 않습니다. 폴더 구조를 유지하고 ZIP 내부 미리보기가 아닌 추출된 HTML을 여세요. 인터넷·공개 서버·SSH 터널은 필요 없습니다.
 
-실패하면 오류와 해시를 확인하고 필요하면 다시 전송하세요. 손상된 내용을 통과시키려고 해시를 직접 수정하지 마세요.
-
-## 6. Mac에서 압축 해제 및 로컬 열람
-
-민감한 원본 내보내기가 아닌 **변환된 아카이브**를 새 폴더에 풉니다.
-
-```sh
-cd ~/MattermostArchives
-mkdir archive-view
-unzip archive.zip -d archive-view
-open archive-view/index.html
-```
-
-압축 해제된 최상위 `index.html`을 브라우저에서 여세요. 대화 페이지와 첨부파일 경로가 유지되도록 폴더 구조를 보존하세요. 업로드하거나 공개 웹 서버를 띄울 필요가 없습니다. 운영 Mattermost에 연결된 클라이언트가 아닌 오프라인 열람 화면입니다. 첨부파일 링크는 신뢰할 수 없는 다운로드로 취급하세요. 링크가 동작하지 않으면 압축 해제가 끝났는지, ZIP 안의 미리보기가 아닌 실제 추출된 index를 열었는지 확인하세요.
-
-ZIP과 압축 해제 폴더 모두 조직의 접근·보존 정책을 적용하세요. 어느 쪽이든 공유하면 포함된 대화와 첨부파일을 공유하게 됩니다. 원본 내보내기 삭제는 별도 보존 판단 사항입니다. 최종 결과를 검증하고 누락 범위를 파악하기 전에 필요한 유일한 원본을 삭제하지 마세요.
+첨부 HTML/SVG는 다운로드 링크로만 제공하지만 **다운로드는 소독이 아닙니다**. 따로 열면 활성 콘텐츠가 실행될 수 있습니다. 무결성 검증 통과는 파일 안전성 보장이 아닙니다. ZIP과 폴더에 접근·보존 정책을 적용하고, 공유 범위와 누락을 검토한 뒤 외부 복사본을 검증하세요. 원본 삭제는 별도 보존 판단입니다.
 
 ## 합성 데이터 테스트
 

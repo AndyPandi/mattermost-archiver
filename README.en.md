@@ -8,6 +8,8 @@ Conversion uses Python 3.9+ and its standard library (no pip installation). Comm
 
 > Raw exports may contain private channels, DMs and other sensitive server-wide data. Restrict them to administrators. The conversion example includes public channels only; DM conversion is unsupported. This is not a full backup/restore tool.
 
+First check `python3 --version` (3.9+), `command -v git`, `command -v wget` and `command -v curl`. Fresh VMs may lack some tools; see [prerequisites](docs/manual.en.md). unzip is not required.
+
 ## 1. Export conversations and attachments as ZIP
 
 Run in the **Mattermost server SSH terminal**, with full-server export authorization and enough disk space. Freeze message/file changes for a final archive. Examples assume `/opt/mattermost/compose.yaml`, service `mattermost` and enabled local mmctl mode.
@@ -42,7 +44,7 @@ sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost /mattermo
 sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" ~/archive-work/raw.zip
 sudo chown "$(id -u):$(id -g)" ~/archive-work/raw.zip
 chmod 600 ~/archive-work/raw.zip
-unzip -t ~/archive-work/raw.zip
+python3 -m zipfile -t ~/archive-work/raw.zip
 ```
 
 The ZIP test must report no errors. `umask 077` restricts newly created files to their owner by default. The container temporary copy is not automatically removed.
@@ -117,7 +119,7 @@ Attachment names use `sanitized-name__last8hash.ext`, extending the suffix on co
 - [Detailed manual](docs/manual.en.md): automated extraction, resume/recovery, resource limits, categories and private channels
 - [Implementation scope](docs/project-state.md)
 - ZIPs are unencrypted. Confirm sharing scope and verify an external copy before deleting the server.
-- Markdown is plain text; plugin data restoration is not guaranteed. Open only trusted attachments.
+- Markdown is plain text; plugin data restoration is not guaranteed. Download is not sanitization: opening HTML/SVG attachments can execute active content. SHA-256 verifies integrity, not authenticity or safety.
 
 ## License
 

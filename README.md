@@ -8,6 +8,8 @@
 
 > 원본 export는 DM·비공개 채널 등을 포함하는 서버 전체 민감 데이터입니다. 관리자만 보관하세요. 아래 변환은 공개 채널만 포함하며 DM은 지원하지 않습니다. 완전한 백업·복원 도구가 아닙니다.
 
+먼저 `python3 --version`(3.9+), `command -v git`, `command -v wget`, `command -v curl`로 확인하세요. 새 VM에는 일부 도구가 없을 수 있습니다. [상세 준비 안내](docs/manual.ko.md)를 참고하세요. unzip은 필요 없습니다.
+
 ## 1. Mattermost 대화·첨부파일을 ZIP으로 추출
 
 **Mattermost 서버 SSH 터미널에서 실행합니다.** 전체 추출 권한과 여유 공간을 확인하세요. 최종 보관 시에는 메시지·파일 변경을 멈추세요. 예시는 Compose 경로 `/opt/mattermost/compose.yaml`, 서비스 `mattermost`, 로컬 mmctl 활성화를 전제로 합니다.
@@ -42,7 +44,7 @@ sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost /mattermo
 sudo docker compose -f /opt/mattermost/compose.yaml cp "mattermost:$REMOTE_DIR/raw.zip" ~/archive-work/raw.zip
 sudo chown "$(id -u):$(id -g)" ~/archive-work/raw.zip
 chmod 600 ~/archive-work/raw.zip
-unzip -t ~/archive-work/raw.zip
+python3 -m zipfile -t ~/archive-work/raw.zip
 ```
 
 ZIP 검사에서 오류가 없어야 합니다. `umask 077`은 새 파일을 본인만 접근하도록 하는 기본 권한 설정입니다. 위 과정에서 만든 컨테이너 임시 사본은 자동 삭제되지 않습니다.
@@ -118,6 +120,8 @@ scp -i "<SSH_PRIVATE_KEY>" opc@<SERVER_IP>:/home/opc/archive-work/archive.zip .
 - [현재 구현 범위](docs/project-state.md)
 - ZIP은 암호화되지 않습니다. 공유 범위를 확인하고, 외부 다운로드·열람 검증 전에 서버를 삭제하지 마세요.
 - Markdown은 일반 텍스트로 표시하며 플러그인 데이터 복원은 보장하지 않습니다. 첨부파일은 신뢰할 수 있는 것만 여세요.
+
+첨부 HTML/SVG 다운로드는 소독이 아니며 별도로 열면 활성 콘텐츠가 실행될 수 있습니다. SHA-256 검증은 무결성 확인이지 진위·안전성 보장이 아닙니다.
 
 ## 라이선스
 

@@ -14,26 +14,38 @@ Export a live Mattermost server, select conversations, and create an offline arc
 - Plugin data and polls are not guaranteed to survive conversion. Markdown is displayed as escaped plain text rather than full Mattermost rendering. This is not a complete representation of every server object.
 - HTML/SVG and other untrusted attachments are download-only, not inline-rendered. Downloading is not sanitization: opening downloaded files in other applications can still be dangerous.
 
-## 1. Get the private repository and prerequisites
+## 1. Public download and prerequisites
 
-Use Python 3.9+, Git, enough free disk space, and authorized access to the Docker deployment. Clone the private repository with your authorized SSH key:
+Python 3.9+ and OS timezone data are required. A fresh OCI/Oracle Linux VM may lack Git/wget/unzip. Check first (package installation below is optional and must be run by an authorized operator).
 
 ```sh
-git clone git@github.com:AndyPandi/mattermost-archiver.git
-cd mattermost-archiver
 python3 --version
+command -v git; command -v wget; command -v curl
+# Optional on Oracle Linux 9 only; use your OS package manager elsewhere:
+# sudo dnf install python3 git curl tzdata
+```
+
+For a public repository, clone over HTTPS without login. Use a new directory; do not overwrite existing files.
+
+```sh
+cd ~
+git clone https://github.com/AndyPandi/mattermost-archiver.git
+cd mattermost-archiver
 python3 mattermost_archiver.py --help
 ```
 
-Alternatively, use an installed GitHub CLI and interactive authentication:
+Without Git, choose wget or curl. Python’s standard library replaces unzip.
 
 ```sh
-gh auth login
-gh repo clone AndyPandi/mattermost-archiver
-cd mattermost-archiver
+cd ~
+wget -O mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+# Alternative: choose ONE downloader
+# curl -fL -o mattermost-archiver-main.zip https://github.com/AndyPandi/mattermost-archiver/archive/refs/heads/main.zip
+python3 -m zipfile -e mattermost-archiver-main.zip archiver-source
+cd ~/archiver-source/mattermost-archiver-main
 ```
 
-Never embed tokens, passwords, or private keys in clone URLs, scripts, archives, or committed files. Use the same repository revision on the extraction host and Mac.
+**Private fallback:** if anonymous download fails, sign into GitHub, use Code → Download ZIP and transfer it, or clone with an authorized SSH key. Never put tokens/keys in URLs. main is mutable: record/pin a reviewed commit and inspect code before executing it. Never pipe downloads into a shell.
 
 Examples assume Compose service `mattermost`, Compose file `/opt/mattermost/compose.yaml`, and bundled binary `/mattermost/bin/mmctl`. Adapt these to your deployment; use the mmctl shipped with your server and inspect its help for version-specific syntax.
 
@@ -52,9 +64,49 @@ df -h .
 
 The examples write artifacts in the current directory. Keep them out of version control, or use absolute paths to an access-controlled working directory.
 
-Plan for the server-generated export, container download, host raw ZIP, conversion temporary files, converted ZIP, and the Mac ZIP plus extracted contents. Several copies can coexist. Several times the raw ZIP size is only a rough estimate, **not a guarantee**: compressed sizes do not reliably predict expanded sizes. Check server export storage, container storage, temporary storage, host output storage, and Mac storage independently. Attachments often dominate.
+Plan for the server-generated export, container download, host raw ZIP, conversion temporary files, converted ZIP, and the local PC ZIP plus extracted contents. Several copies can coexist. Several times the raw ZIP size is only a rough estimate, **not a guarantee**: compressed sizes do not reliably predict expanded sizes. Check server export storage, container storage, temporary storage, host output storage, and local PC storage independently. Attachments often dominate.
 
-## 3. Extract from the live server
+## 3. Administrator manual extraction (default for a new OCI VM)
+
+**Proceed only with explicit full-server export consent.** Selecting one public channel later does not narrow extraction. Check every command succeeds; stop on failure. Run from the ordinary user's SSH shell, applying sudo only to the Docker commands below. New OCI VMs have root-owned /opt/mattermost mode 0700, compose mode 0600, and opc outside the docker group. Never weaken directory/env/compose permissions or Docker socket/group access to bypass this boundary. The chown below transfers only the newly downloaded file in a fresh private temporary directory to the ordinary user. Subsequent list/convert/verify run without sudo.
+
+Run on the Docker host. Confirm syntax with the installed `mmctl --local export --help`. Replace `JOB_ID` and `ID_export.zip` with actual returned values.
+
+```sh
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export create --include-archived-channels
+
+# Record the returned job ID; check until successful.
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export job show JOB_ID
+
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local --json export list
+
+# Use the exact export filename from the list.
+REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  mkdir -m 700 "$REMOTE_DIR"
+sudo docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
+  /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
+
+umask 077
+LOCAL_DIR="$(mktemp -d ./mm-manual-XXXXXXXX)"
+sudo docker compose -f /opt/mattermost/compose.yaml cp \
+  "mattermost:$REMOTE_DIR/export.zip" "$LOCAL_DIR/raw.zip"
+sudo chown "$(id -u):$(id -g)" "$LOCAL_DIR/raw.zip"
+chmod 600 "$LOCAL_DIR/raw.zip"
+# ln refuses an existing raw.zip; retain temporary files if any command fails.
+ln "$LOCAL_DIR/raw.zip" ./raw.zip
+python3 -m zipfile -t raw.zip
+sha256sum raw.zip
+```
+
+Wait for job success before downloading. On failure, inspect job errors and server logs. Container temporary downloads may disappear after recreation. Manage temporary copies through your retention process; these instructions do not delete source messages or export artifacts.
+
+### Optional advanced workflow: automated extraction and resume
+
+The following Python export flow is only for a user **already authorized to access the actual Docker daemon and protected compose/env files**. Do not assume an ordinary opc user on a new OCI VM has that access. Prefer the administrator manual flow above. Sudo Python is not the default: root would execute both downloaded mattermost_archiver.py and imported export_live.py. If an administrator deliberately chooses root execution, review and pin the entire revision and import paths, place code in root-owned locations not writable by ordinary users, and protect working directories, state and output files. Do not run root Python from a user-writable checkout.
 
 Inspect options and preview the operation:
 
@@ -88,39 +140,6 @@ python3 mattermost_archiver.py export \
 
 A job ID is not an export filename. Match the completed job to the artifact listed by mmctl. If retention has expired that artifact, resume cannot restore it; an authorized new export is needed.
 
-### Manual extraction fallback
-
-Run on the Docker host. Confirm syntax with the installed `mmctl --local export --help`. Replace `JOB_ID` and `ID_export.zip` with actual returned values.
-
-```sh
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export create --include-archived-channels
-
-# Record the returned job ID; check until successful.
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export job show JOB_ID
-
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local --json export list
-
-# Use the exact export filename from the list.
-REMOTE_DIR="/tmp/mm-archiver-manual-$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  mkdir -m 700 "$REMOTE_DIR"
-docker compose -f /opt/mattermost/compose.yaml exec -T mattermost \
-  /mattermost/bin/mmctl --local export download ID_export.zip "$REMOTE_DIR/export.zip"
-
-LOCAL_DIR="$(mktemp -d ./mm-manual-XXXXXXXX)"
-docker compose -f /opt/mattermost/compose.yaml cp \
-  "mattermost:$REMOTE_DIR/export.zip" "$LOCAL_DIR/raw.zip"
-chmod 600 "$LOCAL_DIR/raw.zip"
-# ln refuses an existing raw.zip; retain temporary files if any command fails.
-ln "$LOCAL_DIR/raw.zip" ./raw.zip
-sha256sum raw.zip
-```
-
-Wait for job success before downloading. On failure, inspect job errors and server logs. Container temporary downloads may disappear after recreation. Manage temporary copies through your retention process; these instructions do not delete source messages or export artifacts.
-
 ## 4. Inspect and select conversations
 
 ```sh
@@ -147,56 +166,42 @@ python3 mattermost_archiver.py convert raw.zip --output archive.zip \
 
 Private channels are excluded by default. Add `--include-private` to an explicit team/channel selection only when authorized and intended. Naming a private channel does not bypass the opt-in requirement. Do not assume `--all-public` includes private channels. Direct/group messages remain unsupported regardless of this flag.
 
+**Selectors form a UNION, not an intersection.** Combining --team, --channel and --all-public adds their scopes. --team engineering --channel engineering/town-square does not narrow to one channel. --include-private can include every private channel in an explicitly selected team. --all-public with only --include-private adds no private channels.
+
+For exactly one public channel, use no other selection flags:
+
+```sh
+python3 mattermost_archiver.py convert raw.zip --output one-channel.zip --channel engineering/town-square
+```
+
 Optional `--categories mapping.json` supplies category grouping. The JSON schema is a flat object, for example: `{"engineering/town-square":"Company", "operations/incidents":"Operations"}`. Categories are a viewing aid, not a reconstruction of Mattermost’s per-user sidebar. They are not required for export or selection.
 
 `--timezone Asia/Seoul` controls displayed timestamps, not source timestamps. The host must have the requested IANA timezone in its system timezone database; resolve a missing database rather than silently using a different zone.
 
 Review the conversion summary/report for selection, skipped direct/group messages, unsupported records, missing attachments, and limits reached. Processing uses bounded resource budgets; consult `convert --help` for available configuration and defaults. Raise limits only for trusted input after checking resources. Limits are safeguards, not guarantees against every malformed ZIP. Do not interpret an incomplete conversion as a complete backup.
 
-## 5. Verify and transfer to Mac
+## 5. Verify and transfer to a PC (Windows/macOS/Linux)
 
-On the server:
+Verify as the ordinary server user. SHA-256 checks integrity, not authenticity, safety or completeness. An attacker replacing both ZIP and digest defeats comparison; record the digest through a trusted channel.
 
 ```sh
 python3 mattermost_archiver.py verify archive.zip
 sha256sum archive.zip
 ```
 
-Record the digest through a trusted channel. On the Mac, replace the SSH host/path:
+In your PC terminal, replace the SSH host/path. Use a new local folder with no existing destination file.
 
 ```sh
-mkdir -p ~/MattermostArchives
-chmod 700 ~/MattermostArchives
-cd ~/MattermostArchives
 scp user@server:/absolute/path/archive.zip ./archive.zip
-shasum -a 256 archive.zip
 ```
 
-The digests must match exactly. This checks transfer consistency, not authenticity if an attacker can replace both ZIP and digest. Internal archive verification checks integrity/structure according to its manifest; it does not prove that the source export captured everything.
+Compare hashes using Linux `sha256sum archive.zip`, macOS `shasum -a 256 archive.zip`, or Windows PowerShell `Get-FileHash archive.zip -Algorithm SHA256`. On Linux/macOS with Python 3.9+ and the same source revision, you can also run verify locally. Native Windows CLI execution is not validated. On failure, re-copy; never edit hashes to force a pass.
 
-Clone the same repository revision on the Mac as described above. With Python 3.9+:
+## 6. Extract and view locally
 
-```sh
-python3 /absolute/path/mattermost-archiver/mattermost_archiver.py verify \
-  ~/MattermostArchives/archive.zip
-```
+Extract the **converted archive.zip**, not sensitive raw.zip, into a new folder using your OS archive utility. Alternatively, with Python use `python3 -m zipfile -e archive.zip archive-view` without unzip. Open the extracted index.html in a browser on Windows, macOS or Linux. Viewing needs neither Python nor Mattermost. Keep the folder structure intact; do not use the ZIP preview. No Internet, public server or SSH tunnel is needed.
 
-If verification fails, inspect the error and compare digests; re-copy if necessary. Never hand-edit hashes to make corrupted content pass.
-
-## 6. Extract and view locally on Mac
-
-Extract the **converted archive**, not the sensitive raw export, into a new folder:
-
-```sh
-cd ~/MattermostArchives
-mkdir archive-view
-unzip archive.zip -d archive-view
-open archive-view/index.html
-```
-
-Open the extracted top-level `index.html` in your browser. Keep the folder structure intact for conversation pages and attachments. No upload or public server is needed. This is an offline view, not a live Mattermost client. Treat attachment links as untrusted downloads. If links fail, check extraction completed and you opened the extracted index, not a preview inside the ZIP.
-
-Apply your organization’s access/retention policy to both ZIP and extracted folder. Sharing either shares the included conversations and attachments. Deleting the raw export is a separate retention decision: first verify the final archive and understand its omissions.
+HTML/SVG attachments are download links only, but **download is not sanitization**: opening them separately may execute active content. Passing integrity verification does not prove file safety. Protect ZIP and extracted folder under your access/retention policy, review sharing scope and omissions, and verify an external copy. Deleting the raw export is a separate retention decision.
 
 ## Synthetic tests
 

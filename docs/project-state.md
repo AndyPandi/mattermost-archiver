@@ -12,6 +12,9 @@ Python 3.9+ standard-library CLI separates privileged full-server extraction fro
 - Traversal/symlink/duplicate/compression-budget rejection, missing selected attachment refusal and temporary staging.
 - Korean-default README.md and English README.en.md five-step extraction-to-browser quick starts and separate detailed manuals; synthetic adversarial and mocked export tests.
 
+- Consumed input shapes/scalars and selected recursive reply scope are validated with payload-free ArchiveError failures before publication; nullable optional Go export fields remain accepted. Selection UNION/private opt-in behavior is explicit in help/manuals and regression-tested.
+- Detailed bilingual manuals default to administrator manual extraction and unprivileged conversion for restricted OCI permissions; public downloads, prerequisites, cross-platform viewing and active attachment/integrity limitations are documented. Local synthetic suite: 44 tests (8 new methods); actual VM/live export remains unvalidated.
+
 ## Current priorities
 Independent review and authorized representative deployment validation before production use.
 

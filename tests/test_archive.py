@@ -192,6 +192,129 @@ class ArchiveTests(unittest.TestCase):
         result = subprocess.run([sys.executable, cli, 'export', '--output', str(self.root / 'new.zip')], capture_output=True)
         self.assertEqual(result.returncode, 1)
 
+    def assert_invalid_input(self):
+        self.make()
+        with self.assertRaises(m.ArchiveError) as error:
+            self.run_convert()
+        self.assertNotIn('SENSITIVE', str(error.exception))
+        self.assertFalse(self.out.exists())
+        self.assertEqual(list(self.root.glob('.mm-archive-*')), [])
+        result = subprocess.run([sys.executable, m.__file__, 'convert', str(self.raw),
+                                 '--output', str(self.out), '--all-public',
+                                 '--min-free-bytes', '1'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertNotIn('SENSITIVE', result.stderr + result.stdout)
+        self.assertFalse(self.out.exists())
+
+    def test_malformed_channel_metadata(self):
+        for value in ([], ['SENSITIVE'], None, 'SENSITIVE',
+                      {'team': [], 'name': 'x', 'type': 'O'},
+                      {'team': 'demo', 'name': {}, 'type': 'O'},
+                      {'team': 'demo', 'name': 'x', 'type': []},
+                      {'team': 'demo', 'name': 'x', 'type': 'O', 'display_name': {}}):
+            with self.subTest(value=value):
+                self.rows[2]['channel'] = value
+                self.assert_invalid_input()
+                with self.assertRaises(m.ArchiveError):
+                    m.list_archive(self.args('list'))
+
+    def test_malformed_post_scalars(self):
+        import copy
+        original = copy.deepcopy(self.rows[4]['post'])
+        for field, value in [('team', []), ('channel', {}), ('user', {}),
+                             ('message', ['SENSITIVE']), ('create_at', True),
+                             ('create_at', 'SENSITIVE'), ('create_at', None),
+                             ('create_at', 1.5), ('create_at', 10**100),
+                             ('edit_at', []), ('is_pinned', 'SENSITIVE')]:
+            with self.subTest(field=field, value=value):
+                self.rows[4]['post'] = copy.deepcopy(original)
+                self.rows[4]['post'][field] = value
+                self.assert_invalid_input()
+
+    def test_malformed_nested_collections(self):
+        import copy
+        original = copy.deepcopy(self.rows[4]['post'])
+        cases = [(field, value) for field in ('replies', 'reactions', 'attachments')
+                 for value in ({}, 'SENSITIVE', 1, [None], ['SENSITIVE'], [[]])]
+        cases += [('attachments', [{}]), ('attachments', [{'path': []}]),
+                  ('reactions', [{}]), ('reactions', [{'user': {}, 'emoji_name': 'x', 'create_at': 1}]),
+                  ('reactions', [{'user': 'x', 'emoji_name': [], 'create_at': 1}]),
+                  ('reactions', [{'user': 'x', 'emoji_name': 'x', 'create_at': False}]),
+                  ('replies', [{'create_at': 'SENSITIVE'}])]
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                self.rows[4]['post'] = copy.deepcopy(original)
+                self.rows[4]['post'][field] = value
+                self.assert_invalid_input()
+
+    def test_reply_scope_rejection_recursive(self):
+        import copy
+        original = copy.deepcopy(self.rows[4]['post'])
+        for depth in (0, 1):
+            for field, value in [('team', 'SENSITIVE'), ('channel', 'secret-room'),
+                                 ('team', None), ('channel', None), ('channel', [])]:
+                with self.subTest(depth=depth, field=field, value=value):
+                    self.rows[4]['post'] = copy.deepcopy(original)
+                    reply = self.rows[4]['post']['replies'][0]
+                    if depth:
+                        reply = reply['replies'][0]
+                    reply[field] = value
+                    self.assert_invalid_input()
+
+    def test_reply_inherited_and_explicit_scope(self):
+        reply = self.rows[4]['post']['replies'][0]
+        reply.update(team='demo', channel='public')
+        reply['replies'][0]['channel'] = 'public'
+        self.make()
+        self.run_convert()
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
+    def test_nullable_optional_export_fields(self):
+        post = self.rows[4]['post']
+        for field in ('message', 'user', 'edit_at', 'is_pinned', 'attachments', 'reactions', 'replies'):
+            post[field] = None
+        self.make()
+        self.run_convert()
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
+    def test_selection_union_and_privacy_guards(self):
+        channels = {('a', 'one'): {'type': 'O'}, ('a', 'two'): {'type': 'O'},
+                    ('a', 'private'): {'type': 'P'}, ('b', 'one'): {'type': 'O'}}
+        a = self.args()
+        a.all_public = False
+        a.channel = ['a/one']
+        self.assertEqual(m.selected_channels(channels, a), {('a', 'one')})
+        a.team = ['a']
+        a.channel = ['b/one']
+        self.assertEqual(m.selected_channels(channels, a), set(channels) - {('a', 'private')})
+        a.include_private = True
+        self.assertEqual(m.selected_channels(channels, a), set(channels))
+        a.team = a.channel = None
+        a.all_public = True
+        self.assertNotIn(('a', 'private'), m.selected_channels(channels, a))
+        a.all_public = False
+        a.channel = ['a/private']
+        a.include_private = False
+        with self.assertRaises(m.ArchiveError):
+            m.selected_channels(channels, a)
+        a.include_private = True
+        self.assertEqual(m.selected_channels(channels, a), {('a', 'private')})
+        a.all_public = True
+        self.assertEqual(m.selected_channels(channels, a), set(channels))
+
+    def test_malformed_manifest_shapes(self):
+        for manifest in ([], None, {'format': 'mattermost-offline-archive', 'version': 1, 'files': []},
+                         {'format': 'mattermost-offline-archive', 'version': 1,
+                          'files': {'index.html': ['SENSITIVE']}}):
+            with self.subTest(manifest=manifest):
+                with zipfile.ZipFile(self.out, 'w') as z:
+                    z.writestr('manifest.json', json.dumps(manifest))
+                with self.assertRaises(m.ArchiveError):
+                    m.verify(self.args('verify'))
+
     def test_list(self):
         with contextlib.redirect_stdout(io.StringIO()) as out:
             m.list_archive(self.args('list'))

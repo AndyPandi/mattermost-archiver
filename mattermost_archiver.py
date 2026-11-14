@@ -120,6 +120,64 @@ def records(z, args):
             yield item
 
 
+def string_field(obj, field, required=False):
+    value = obj.get(field)
+    if (required and (not isinstance(value, str) or not value)) or (
+            value is not None and not isinstance(value, str)):
+        raise ArchiveError('Invalid string field: ' + field)
+
+
+def timestamp_field(obj, field, tz, required=False):
+    value = obj.get(field)
+    if value is None and not required:
+        return
+    if type(value) is not int:
+        raise ArchiveError('Invalid timestamp field: ' + field)
+    try:
+        datetime.datetime.fromtimestamp(value / 1000, tz)
+    except (ValueError, OverflowError, OSError):
+        raise ArchiveError('Timestamp out of supported range') from None
+
+
+def object_list(obj, field):
+    value = obj.get(field)
+    # Go pointer-to-slice exports may encode an empty collection as null.
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(x, dict) for x in value):
+        raise ArchiveError('Invalid object list: ' + field)
+    return value
+
+
+def validate_post(post, scope, args, tz, count, depth=0):
+    if depth > args.max_depth or not isinstance(post, dict):
+        raise ArchiveError('Reply nesting budget exceeded or malformed reply')
+    count[0] += 1
+    if count[0] > args.max_records:
+        raise ArchiveError('Post/reply count budget exceeded')
+    # Omitted reply scope inherits the parent. Explicit null is not omission.
+    for field, expected in zip(('team', 'channel'), scope):
+        if depth == 0 or field in post:
+            string_field(post, field, required=True)
+            if post[field] != expected:
+                raise ArchiveError('Reply scope does not match parent channel/team')
+    for field in ('user', 'message'):
+        string_field(post, field)
+    timestamp_field(post, 'create_at', tz, required=True)
+    timestamp_field(post, 'edit_at', tz)
+    if post.get('is_pinned') is not None and type(post['is_pinned']) is not bool:
+        raise ArchiveError('Invalid pinned flag')
+    for attachment in object_list(post, 'attachments'):
+        string_field(attachment, 'path', required=True)
+        safe_name(attachment['path'])
+    for reaction in object_list(post, 'reactions'):
+        string_field(reaction, 'user', required=True)
+        string_field(reaction, 'emoji_name', required=True)
+        timestamp_field(reaction, 'create_at', tz, required=True)
+    for reply in object_list(post, 'replies'):
+        validate_post(reply, scope, args, tz, count, depth + 1)
+
+
 def scan(z, args):
     channels = {}
     version = None
@@ -128,11 +186,14 @@ def scan(z, args):
         t = r['type']
         types[t] += 1
         if t == 'version':
-            if version is not None or r.get('version') != 1:
+            if version is not None or type(r.get('version')) is not int or r.get('version') != 1:
                 raise ArchiveError('Expected exactly one supported export version (1)')
             version = r['version']
         if t == 'channel':
-            c = r.get('channel', {})
+            c = r.get('channel')
+            if not isinstance(c, dict):
+                raise ArchiveError('Invalid channel metadata')
+            string_field(c, 'display_name')
             key = (c.get('team'), c.get('name'))
             if not all(isinstance(x, str) and x for x in key) or c.get('type') not in ('O', 'P'):
                 raise ArchiveError('Invalid channel metadata')
@@ -200,16 +261,20 @@ def convert(args):
         groups = collections.defaultdict(list)
         skipped = collections.Counter()
         used = 0
+        validated_count = [0]
         for r in records(z, args):
             t = r['type']
             if t == 'post':
                 p = r.get('post')
                 if not isinstance(p, dict):
                     raise ArchiveError('Invalid post')
-                key = (p.get('team'), p.get('channel'))
+                string_field(p, 'team', required=True)
+                string_field(p, 'channel', required=True)
+                key = (p['team'], p['channel'])
                 if key not in channels:
                     raise ArchiveError('Post references unknown channel')
                 if key in selected:
+                    validate_post(p, key, args, tz, validated_count)
                     used += len(json.dumps(p, ensure_ascii=False).encode('utf-8'))
                     if used > args.max_post_bytes:
                         raise ArchiveError('Selected post memory budget exceeded')
@@ -267,13 +332,13 @@ def convert(args):
                 counts['replies' if depth else 'posts'] += 1
                 if counts['posts'] + counts['replies'] > args.max_records:
                     raise ArchiveError('Post/reply count budget exceeded')
-                header = esc(p.get('user', 'unknown')) + ' · ' + esc(timestamp(p.get('create_at')))
+                header = esc(p.get('user') or 'unknown') + ' · ' + esc(timestamp(p.get('create_at')))
                 if p.get('edit_at'):
                     header += ' · edited ' + esc(timestamp(p['edit_at']))
                 if p.get('is_pinned'):
                     header += ' · pinned'
                 s = '<article class="' + ('reply' if depth else 'post') + '"><header>' + header + '</header>'
-                s += '<pre>' + esc(p.get('message', '')) + '</pre>'
+                s += '<pre>' + esc(p.get('message') or '') + '</pre>'
                 for a in p.get('attachments') or []:
                     target = attach(a['path'])
                     s += '<p><a download rel="noopener noreferrer" href="' + esc(target) + '">' + esc(PurePosixPath(a['path']).name) + '</a> (untrusted attachment)</p>'
@@ -324,9 +389,17 @@ def verify(args):
         if info.file_size > args.max_line_bytes:
             raise ArchiveError('Manifest budget exceeded')
         m = json.loads(z.read(info))
-        if m.get('format') != 'mattermost-offline-archive' or m.get('version') != 1:
+        if not isinstance(m, dict) or m.get('format') != 'mattermost-offline-archive' or m.get('version') != 1:
             raise ArchiveError('Unsupported manifest')
-        files = m['files']
+        files = m.get('files')
+        if not isinstance(files, dict):
+            raise ArchiveError('Invalid manifest files')
+        for expected in files.values():
+            if (not isinstance(expected, dict) or
+                    not isinstance(expected.get('sha256'), str) or
+                    not re.fullmatch(r'[0-9a-f]{64}', expected['sha256']) or
+                    type(expected.get('bytes')) is not int or expected['bytes'] < 0):
+                raise ArchiveError('Invalid manifest file metadata')
         if set(z.namelist()) != set(files) | {'manifest.json'}:
             raise ArchiveError('Manifest member set mismatch')
         for name, expected in files.items():
@@ -335,7 +408,11 @@ def verify(args):
                     raise ArchiveError('Archive checksum/size mismatch')
         if 'index.html' not in files or any(n != 'index.html' and not n.startswith('attachments/') for n in files):
             raise ArchiveError('Unexpected viewer member')
-        counts = m['counts']
+        counts = m.get('counts')
+        if not isinstance(counts, dict) or any(
+                type(counts.get(k)) is not int or counts[k] < 0
+                for k in ('posts', 'replies', 'channels', 'attachments')):
+            raise ArchiveError('Invalid manifest counts')
         if counts['attachments'] != sum(n.startswith('attachments/') for n in files):
             raise ArchiveError('Attachment count mismatch')
         # Count generated markup, not user text (user text has escaped angle brackets).
@@ -380,10 +457,10 @@ def build_parser():
         q.set_defaults(func=fn)
         if cmd == 'convert':
             q.add_argument('--output', required=True)
-            q.add_argument('--team', action='append')
-            q.add_argument('--channel', action='append')
-            q.add_argument('--all-public', action='store_true')
-            q.add_argument('--include-private', action='store_true')
+            q.add_argument('--team', action='append', help='add all eligible channels in TEAM (UNION, not intersection)')
+            q.add_argument('--channel', action='append', help='add TEAM/CHANNEL; for one channel use this alone')
+            q.add_argument('--all-public', action='store_true', help='add every public channel to the selection UNION')
+            q.add_argument('--include-private', action='store_true', help='allow private channels in explicit teams/channels; broadens --team')
             q.add_argument('--categories')
             q.add_argument('--timezone', default='Asia/Seoul')
             q.add_argument('--max-post-bytes', type=int, default=256 * 1024**2)
