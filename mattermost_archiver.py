@@ -32,6 +32,19 @@ def digest(stream):
     return h.hexdigest()
 
 
+def attachment_target(member, base, used):
+    """Short path hash suffix, expanded on case-insensitive filename collision."""
+    suffix = PurePosixPath(base).suffix
+    stem = base[:-len(suffix)] if suffix else base
+    full_hash = hashlib.sha256(member.encode()).hexdigest()
+    for length in range(8, 65, 4):
+        target = 'attachments/' + stem + '__' + full_hash[-length:] + suffix
+        if target.casefold() not in used:
+            used.add(target.casefold())
+            return target
+    raise ArchiveError('Attachment filename collision even at full SHA-256')
+
+
 def safe_name(name):
     if not isinstance(name, str) or not name or '\\' in name or '\x00' in name:
         raise ArchiveError('Unsafe ZIP/path name')
@@ -212,6 +225,7 @@ def convert(args):
             (stage / 'attachments').mkdir()
             files = {}
             attachments = {}
+            used_attachment_names = set()
             counts = {'posts': 0, 'replies': 0, 'attachments': 0, 'channels': len(selected)}
 
             def attach(path):
@@ -226,7 +240,7 @@ def convert(args):
                 if info.is_dir():
                     raise ArchiveError('Attachment is a directory')
                 base = re.sub(r'[^A-Za-z0-9._-]', '_', PurePosixPath(path).name)[:100] or 'attachment'
-                target = 'attachments/' + hashlib.sha256(member.encode()).hexdigest() + '-' + base
+                target = attachment_target(member, base, used_attachment_names)
                 h = hashlib.sha256()
                 size = 0
                 with z.open(info) as src, open(stage / target, 'xb') as dst:

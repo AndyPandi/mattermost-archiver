@@ -11,3 +11,5 @@ Verification checks exact member set, streaming hashes and sizes, then generated
 ## Related Documents
 - [CLI manuals](../../README.md): extraction and operational procedures.
 - [Security decision](../decisions/ADR-002-offline-inert-archive.md): threat and scope choices.
+
+Attachment filename allocation uses a sanitized basename with the last eight path-hash digits before the final extension. A casefold name set detects collisions and extends by four digits up to the full hash, then fails closed. Same ZIP member references reuse their allocated path.

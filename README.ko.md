@@ -227,3 +227,6 @@ python3 -m unittest discover -s tests -v
 - 합성 테스트 통과만으로 Python 3.9 실제 런타임, OL9/macOS, 운영 서버 또는 브라우저 동작이 검증된 것은 아닙니다. 시간대 DB는 OS에 설치되어 있어야 합니다.
 
 공식 v11.7.0 근거: [export 명령](https://github.com/mattermost/mattermost/blob/v11.7.0/server/cmd/mmctl/commands/export.go), [JSON 출력](https://github.com/mattermost/mattermost/blob/v11.7.0/server/cmd/mmctl/printer/printer.go), [worker](https://github.com/mattermost/mattermost/blob/v11.7.0/server/channels/jobs/export_process/worker.go), [첨부 저장](https://github.com/mattermost/mattermost/blob/v11.7.0/server/channels/app/export.go), [data 상수](https://github.com/mattermost/mattermost/blob/v11.7.0/server/public/model/bulk_export.go). 루트는 `import.jsonl`, 첨부 경로 PATH는 정확히 `data/PATH`입니다. 작업 JSON은 소문자 필드이며 보통 단일 객체 배열입니다. type은 `export_process`, 성공 status는 `success`, 파일명은 `JOBID_export.zip`입니다. 알 수 없는 배치는 추측하지 않고 실패합니다.
+
+### 첨부파일 이름
+저장 파일명은 `정규화된파일명__해시뒤8자리.확장자` 형태입니다. 해시는 파일 내용이 아닌 원본 ZIP 내부 경로의 SHA-256입니다. 대소문자를 구분하지 않는 파일명 충돌이 발생하면 12·16자리부터 최대 64자리까지 확장하며, 그래도 충돌하면 덮어쓰지 않고 실패합니다. HTML 표시 이름은 원래 이름을 유지하고 무결성 검증 해시는 전체 SHA-256을 사용합니다. 기존 아카이브는 자동 변경되지 않으므로 원본 export를 새 출력 ZIP으로 다시 변환하세요.
