@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Mattermost bulk export to inert, offline HTML. Python 3.9+, stdlib only."""
+from chat_style import CHAT_CSS, EMOJI_ALIASES
+
 import argparse
 import collections
 import contextlib
@@ -326,44 +328,80 @@ def convert(args):
                     raise ArchiveError('Invalid post timestamp')
                 return datetime.datetime.fromtimestamp(value / 1000, tz).isoformat()
 
+            def time_tag(value):
+                iso = timestamp(value)
+                label = datetime.datetime.fromtimestamp(value / 1000, tz).strftime('%Y-%m-%d %H:%M')
+                return '<time datetime="' + esc(iso) + '" title="' + esc(iso) + '">' + label + '</time>'
+
             def render(p, depth=0):
                 if depth > args.max_depth or not isinstance(p, dict):
                     raise ArchiveError('Reply nesting budget exceeded or malformed reply')
                 counts['replies' if depth else 'posts'] += 1
                 if counts['posts'] + counts['replies'] > args.max_records:
                     raise ArchiveError('Post/reply count budget exceeded')
-                header = esc(p.get('user') or 'unknown') + ' · ' + esc(timestamp(p.get('create_at')))
-                if p.get('edit_at'):
-                    header += ' · edited ' + esc(timestamp(p['edit_at']))
+                user = p.get('user') or 'unknown'
+                color = int(hashlib.sha256(user.encode('utf-8')).hexdigest()[:8], 16) % 6
+                initials = ''.join(part[0] for part in user.split()[:2]) or '?'
+                header = '<strong>' + esc(user) + '</strong> ' + time_tag(p['create_at'])
+                if p.get('edit_at') is not None:
+                    header += ' <span class="meta">수정 ' + time_tag(p['edit_at']) + '</span>'
                 if p.get('is_pinned'):
-                    header += ' · pinned'
-                s = '<article class="' + ('reply' if depth else 'post') + '"><header>' + header + '</header>'
+                    header += ' <span class="pin">고정됨</span>'
+                s = '<article class="' + ('reply' if depth else 'post') + '">'
+                s += '<span aria-hidden="true" class="avatar color-' + str(color) + '">' + esc(initials.upper()) + '</span>'
+                s += '<div class="message"><header>' + header + '</header>'
                 s += '<pre>' + esc(p.get('message') or '') + '</pre>'
                 for a in p.get('attachments') or []:
                     target = attach(a['path'])
-                    s += '<p><a download rel="noopener noreferrer" href="' + esc(target) + '">' + esc(PurePosixPath(a['path']).name) + '</a> (untrusted attachment)</p>'
+                    s += '<div class="attachment"><a download rel="noopener noreferrer" href="' + esc(target) + '">↓ ' + esc(PurePosixPath(a['path']).name) + '</a><p>다운로드 · 신뢰할 수 없는 첨부파일 (untrusted attachment)</p></div>'
+                reactions = collections.defaultdict(list)
                 for reaction in p.get('reactions') or []:
-                    s += '<span class="reaction">' + esc(reaction.get('emoji_name', '')) + ' — ' + esc(reaction.get('user', ''))
-                    if reaction.get('create_at'):
-                        s += ' · ' + esc(timestamp(reaction['create_at']))
-                    s += '</span> '
+                    name = reaction['emoji_name']
+                    reactions[EMOJI_ALIASES.get(name, ':' + name + ':')].append(reaction)
+                if reactions:
+                    s += '<div class="reactions" aria-label="반응 · 숫자는 고유 사용자 수">'
+                    for emoji, records in reactions.items():
+                        count = len({r['user'] for r in records})
+                        aliases = ', '.join(sorted({r['emoji_name'] for r in records}))
+                        s += '<details class="reaction"><summary title="' + esc(aliases) + '"><span role="img" aria-label="' + esc(aliases) + '">' + esc(emoji) + '</span> <b>' + str(count) + '</b><span class="sr-only">명 · 반응 상세</span></summary><ul>'
+                        for r in records:
+                            s += '<li>' + esc(r['user']) + ' · ' + time_tag(r['create_at']) + ' <span class="meta">:' + esc(r['emoji_name']) + ':</span></li>'
+                        s += '</ul></details>'
+                    s += '</div>'
                 replies = p.get('replies') or []
                 if replies:
-                    s += '<details><summary>' + str(len(replies)) + ' replies</summary>'
+                    s += '<details><summary class="thread-toggle">답글 ' + str(len(replies)) + '개</summary><div class="thread">'
                     for reply in sorted(replies, key=lambda x: x.get('create_at', 0)):
                         s += render(reply, depth + 1)
-                    s += '</details>'
-                return s + '</article>\n'
+                    s += '</div></details>'
+                return s + '</div></article>\n'
 
             index = stage / 'index.html'
+            ordered = sorted(selected, key=lambda k: (k[0], categories.get('/'.join(k), ''), k[1]))
+            anchors = {key: 'channel-' + str(i) for i, key in enumerate(ordered)}
             with open(index, 'w', encoding='utf-8') as f:
-                f.write('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;"><title>Mattermost archive</title><style>body{font:16px system-ui;max-width:1100px;margin:2rem auto;padding:1rem}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}article{border:1px solid #999;padding:1rem;margin:1rem 0}.reply{margin-left:1rem}header,.reaction{color:#555}summary{cursor:pointer}</style><h1>Mattermost archive</h1><p>Offline reference, not a backup. Attachments are untrusted; do not open active content without inspection.</p>')
-                for key in sorted(selected, key=lambda k: (categories.get('/'.join(k), ''), k)):
-                    f.write('<section><h2>' + esc(categories.get('/'.join(key), 'Channels')) + ' / ' + esc(key[0]) + ' / ' + esc(channels[key].get('display_name') or key[1]) + '</h2>')
+                f.write('<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; base-uri &#39;none&#39;; form-action &#39;none&#39;"><title>Mattermost · 대화 아카이브</title><style>' + CHAT_CSS + '</style></head><body><a class="skip-link" href="#conversation">대화로 바로가기</a><div class="layout"><aside class="sidebar"><div class="brand"><span class="brand-icon">M</span> Mattermost<span class="archive-label">OFFLINE ARCHIVE</span></div><nav aria-label="팀 및 채널">')
+                previous_team = None
+                for key in ordered:
+                    if key[0] != previous_team:
+                        f.write('<h2 class="team-name">' + esc(key[0]) + '</h2>')
+                        previous_team = key[0]
+                    f.write('<a class="channel-link" href="#' + anchors[key] + '"><span>#</span> ' + esc(channels[key].get('display_name') or key[1]) + '<small>' + str(len(groups[key])) + '</small></a>')
+                f.write('</nav><p class="sidebar-note">읽기 전용 · 네트워크 연결 없음</p></aside><main id="conversation"><header class="topbar"><div><span class="eyebrow">YOUR CONVERSATIONS, PRESERVED</span><h1>대화 아카이브</h1></div><span class="offline-badge">● 오프라인</span></header><p class="notice">백업이 아닌 오프라인 참고용입니다. 첨부파일은 신뢰할 수 없으므로 열기 전 확인하세요. <span>시간대: ' + esc(args.timezone) + ' · 반응 숫자: 고유 사용자 수</span></p>')
+                for key in ordered:
+                    # Retain exact v1 count markers for both old and new verifiers.
+                    f.write('<section><header class="channel-header" id="' + anchors[key] + '"><div class="eyebrow">' + esc(key[0]) + ' / ' + esc(categories.get('/'.join(key), 'Channels')) + '</div><h2># ' + esc(channels[key].get('display_name') or key[1]) + '</h2><p>' + str(len(groups[key])) + '개의 메시지</p></header><div class="timeline">')
+                    previous_day = None
                     for post in sorted(groups[key], key=lambda p: p.get('create_at', 0)):
+                        day = datetime.datetime.fromtimestamp(post['create_at'] / 1000, tz).strftime('%Y-%m-%d')
+                        if day != previous_day:
+                            f.write('<div class="day-separator"><time datetime="' + day + '">' + day + '</time></div>')
+                            previous_day = day
                         f.write(render(post))
-                    f.write('</section>')
-                f.write('</html>')
+                    if not groups[key]:
+                        f.write('<p class="empty-state">아직 보관된 메시지가 없습니다.</p>')
+                    f.write('</div></section>')
+                f.write('<footer>End of archive · 오프라인 보관본</footer></main></div></body></html>')
             with open(index, 'rb') as f:
                 files['index.html'] = {'sha256': digest(f), 'bytes': index.stat().st_size}
             manifest = {'format': 'mattermost-offline-archive', 'version': 1, 'generator': VERSION,

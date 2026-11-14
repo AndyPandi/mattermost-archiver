@@ -137,3 +137,18 @@ Project code and documentation are licensed under the [MIT License](LICENSE). Co
 Mattermost and third-party components retain their own licenses. Exported conversations and attachments do not automatically become MIT-licensed.
 
 Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.
+
+## Rebuild the chat viewer from an existing raw.zip
+
+No new server export is needed. Download the **whole source ZIP** into a fresh directory or update your clone; do not replace only one Python file (matching chat_style.py and export_live.py are required). Repeat conversion, verification, copying and opening in the five-step flow, using a new output name. This example selects public channels; retain previous team/channel/private opt-in/categories/timezone options if different.
+
+```bash
+RAW="$HOME/archive-work/raw.zip"
+OUT="$HOME/archive-work/archive-chat.zip"
+python3 mattermost_archiver.py convert "$RAW" --all-public --timezone Asia/Seoul --output "$OUT"
+python3 mattermost_archiver.py verify "$OUT"
+```
+
+Team/channel anchors and native reply/reaction details work without JavaScript. “답글 N개” counts **direct replies**; deeper replies expand separately. Reaction chips count **unique exact usernames per Unicode emoji**, merging synonymous aliases (+1/thumbsup/thumbs_up). Every original record, including duplicates, retains user, timestamp and alias in details. Visible times use YYYY-MM-DD HH:mm in the chosen timezone; exact ISO seconds/fractions/UTC offset remain in time datetime/title.
+
+Common reactions render as Unicode (grinning=😀, smiley=😃, white_check_mark=✅). The complete independently authored small subset is EMOJI_ALIASES in chat_style.py. Unknown/custom aliases stay escaped :name: text without custom image/API calls. Emoji appearance depends on the OS. Avatars use deterministic username initials/colors, not fetched profile images. All attachments including HTML/SVG remain download cards, not sanitized files. No scripts, external fonts/CDNs or network viewer dependencies are introduced.

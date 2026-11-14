@@ -96,6 +96,118 @@ class ArchiveTests(unittest.TestCase):
             self.assertEqual(manifest['skipped']['direct_posts'], 1)
             self.assertLess(page.index('untrusted attachment)</p>'), page.index('&lt;script&gt;'))
 
+    def viewer(self):
+        with zipfile.ZipFile(self.out) as z:
+            return z.read('index.html').decode()
+
+    def test_emoji_group_unique_users_preserve_records(self):
+        self.rows[4]['post']['reactions'] = [
+            {'user': user, 'emoji_name': name, 'create_at': at}
+            for user, name, at in [('a', '+1', 0), ('a', 'thumbs_up', 1),
+                                   ('b', 'thumbsup', 2), ('c', 'grinning', 3),
+                                   ('d', 'white_check_mark', 4)]]
+        self.make()
+        self.run_convert()
+        page = self.viewer()
+        self.assertEqual(page.count('<details class="reaction">'), 3)
+        self.assertIn('👍</span> <b>2</b>', page)
+        self.assertIn('😀</span> <b>1</b>', page)
+        self.assertNotIn('😃', page)
+        self.assertIn('✅</span> <b>1</b>', page)
+        for iso in ('1970-01-01T09:00:00+09:00', '1970-01-01T09:00:00.001000+09:00',
+                    '1970-01-01T09:00:00.002000+09:00'):
+            self.assertIn('datetime="' + iso + '" title="' + iso + '"', page)
+        self.assertIn('고유 사용자 수', page)
+
+    def test_unknown_reactions_and_metadata_escaped(self):
+        evil = '"><img src=x onerror=alert(1)><section><article class="post">'
+        self.rows[2]['channel']['display_name'] = evil
+        self.rows[4]['post']['user'] = evil
+        self.rows[4]['post']['reactions'] = [
+            {'user': evil, 'emoji_name': evil, 'create_at': 0},
+            {'user': 'synthetic', 'emoji_name': 'custom_demo', 'create_at': 1}]
+        self.make()
+        self.run_convert()
+        page = self.viewer()
+        self.assertIn(':custom_demo:', page)
+        self.assertIn(':&quot;&gt;&lt;img', page)
+        for tag in ('<img', '<script', '<iframe', '<svg', '<object'):
+            self.assertNotIn(tag, page)
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
+    def test_chat_navigation_empty_channels_and_day_boundaries(self):
+        from html.parser import HTMLParser
+        self.rows.append({'type': 'channel', 'channel': {'team': 'other', 'name': 'empty', 'type': 'O', 'display_name': None}})
+        self.rows[4]['post']['create_at'] = 86400000
+        self.rows[4]['post']['message'] = '긴 메시지 English ' + 'long' * 1000
+        self.make()
+        self.run_convert()
+        page = self.viewer()
+        class Markup(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.ids, self.links, self.tags = [], [], []
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                self.tags.append((tag, attrs))
+                if 'id' in attrs:
+                    self.ids.append(attrs['id'])
+                if tag == 'a':
+                    self.links.append(attrs.get('href', ''))
+        parser = Markup()
+        parser.feed(page)
+        self.assertEqual(len(parser.ids), len(set(parser.ids)))
+        for link in parser.links:
+            if link.startswith('#'):
+                self.assertIn(link[1:], parser.ids)
+            else:
+                self.assertTrue(link.startswith('attachments/'))
+        self.assertEqual(page.count('class="day-separator"'), 2)
+        self.assertIn('1970-01-02 09:00', page)
+        self.assertIn('아직 보관된 메시지가 없습니다.', page)
+        self.assertIn('@media(max-width:640px)', page)
+        self.assertIn('overflow-wrap:anywhere', page)
+        self.assertIn('default-src &#39;none&#39;', page)
+        self.assertNotIn('url(', page)
+        self.assertEqual(page.count('답글 1개'), 2)
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
+    def test_avatars_deterministic_and_null_metadata(self):
+        import re
+        self.rows[4]['post']['user'] = 'Synthetic User'
+        self.rows[4]['post']['replies'][0]['user'] = 'Synthetic User'
+        self.rows[4]['post']['edit_at'] = 0
+        self.make()
+        self.run_convert()
+        page = self.viewer()
+        avatars = re.findall(r'class="avatar (color-[0-5])">SU</span>', page)
+        self.assertEqual(len(avatars), 2)
+        self.assertEqual(avatars[0], avatars[1])
+        self.assertIn('수정 <time datetime="1970-01-01T09:00:00+09:00"', page)
+
+    def test_verify_count_markers_across_small_chunks(self):
+        self.run_convert()
+        with patch.object(m, 'CHUNK', 43), contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
+    def test_legacy_v1_viewer_verification(self):
+        self.run_convert()
+        with zipfile.ZipFile(self.out) as z:
+            entries = {n: z.read(n) for n in z.namelist()}
+        # Synthetic legacy markup, same exact markers used by d9a7bbd.
+        page = b'<html><section><article class="post"></article><article class="post"><details><article class="reply"><article class="reply"></article></article></details></article></section></html>'
+        manifest = json.loads(entries['manifest.json'])
+        manifest['files']['index.html'] = {'sha256': m.hashlib.sha256(page).hexdigest(), 'bytes': len(page)}
+        entries['index.html'] = page
+        entries['manifest.json'] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(self.out, 'w') as z:
+            for name, data in entries.items():
+                z.writestr(name, data)
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.verify(self.args('verify'))
+
     def test_missing_attachment_atomic(self):
         self.files = {}
         self.make()

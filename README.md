@@ -139,3 +139,18 @@ scp -i "<SSH_PRIVATE_KEY>" opc@<SERVER_IP>:/home/opc/archive-work/archive.zip .
 Mattermost 자체와 타사 구성요소는 각각의 라이선스를 따릅니다. 추출된 대화·첨부파일에 MIT 라이선스가 자동으로 적용되는 것은 아닙니다.
 
 Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.
+
+## 기존 raw.zip으로 채팅 화면 다시 만들기
+
+서버에서 다시 export할 필요가 없습니다. 새 소스 ZIP **전체**를 별도 폴더에 풀거나 저장소를 갱신하세요. Python 파일 하나만 교체하지 마세요(같은 버전의 chat_style.py, export_live.py도 필요). 기존 5단계의 변환·검증·복사·열기만 반복합니다. 이전 archive.zip을 수정하지 않고 새 이름으로 생성하세요. 아래 공개 채널 예시와 다르다면 이전 팀/채널/비공개 동의/카테고리/시간대 옵션을 유지하세요.
+
+```bash
+RAW="$HOME/archive-work/raw.zip"
+OUT="$HOME/archive-work/archive-chat.zip"
+python3 mattermost_archiver.py convert "$RAW" --all-public --timezone Asia/Seoul --output "$OUT"
+python3 mattermost_archiver.py verify "$OUT"
+```
+
+팀/채널 링크와 답글·반응 펼치기는 JavaScript 없이 동작합니다. **답글 N개는 직접 답글 수**이며 중첩 답글은 안에서 다시 펼칩니다. 반응 숫자는 **이모지별 고유 사용자 수**입니다. +1/thumbsup/thumbs_up처럼 동일 Unicode 별칭은 합치고, 중복 기록도 상세에 사용자·원래 별칭·시각을 모두 남깁니다. 보이는 시각은 선택 시간대의 YYYY-MM-DD HH:mm이며 정확한 ISO 초/소수초/UTC 오프셋은 time의 datetime/title에 남습니다.
+
+기본 반응은 Unicode로 표시합니다(grinning=😀, smiley=😃, white_check_mark=✅). 직접 작성한 전체 소규모 지원 목록은 chat_style.py의 EMOJI_ALIASES입니다. 미지원·커스텀 반응은 이스케이프된 :name:이며 이미지/API를 조회하지 않습니다. 이모지 모양은 OS에 따라 다릅니다. 아바타는 이름 기반 이니셜·색상이며 프로필 사진을 가져오지 않습니다. HTML/SVG 포함 첨부는 다운로드 카드일 뿐 안전하게 변환된 파일이 아닙니다. 오프라인·무스크립트·외부 폰트/CDN 없음 정책을 유지합니다.

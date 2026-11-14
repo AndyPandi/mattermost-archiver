@@ -241,3 +241,18 @@ Pinned source evidence (v11.7.0): [export commands](https://github.com/mattermos
 Stored filenames use `sanitized-name__last8hash.ext`. The suffix is the last 8 hex characters of the original ZIP member path SHA-256, not a content hash. Case-insensitive collisions extend the suffix to 12, 16, and further characters up to 64; unresolved collisions fail without overwriting. HTML keeps the original display name. Manifest integrity hashes remain full SHA-256. Reconvert the original export to a new output ZIP to apply this policy; existing archives are not modified.
 
 Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.
+
+## Rebuild the chat viewer from an existing raw.zip
+
+No new server export is needed. Download the **whole source ZIP** into a fresh directory or update your clone; do not replace only one Python file (matching chat_style.py and export_live.py are required). Repeat conversion, verification, copying and opening in the five-step flow, using a new output name. This example selects public channels; retain previous team/channel/private opt-in/categories/timezone options if different.
+
+```bash
+RAW="$HOME/archive-work/raw.zip"
+OUT="$HOME/archive-work/archive-chat.zip"
+python3 mattermost_archiver.py convert "$RAW" --all-public --timezone Asia/Seoul --output "$OUT"
+python3 mattermost_archiver.py verify "$OUT"
+```
+
+Team/channel anchors and native reply/reaction details work without JavaScript. “답글 N개” counts **direct replies**; deeper replies expand separately. Reaction chips count **unique exact usernames per Unicode emoji**, merging synonymous aliases (+1/thumbsup/thumbs_up). Every original record, including duplicates, retains user, timestamp and alias in details. Visible times use YYYY-MM-DD HH:mm in the chosen timezone; exact ISO seconds/fractions/UTC offset remain in time datetime/title.
+
+Common reactions render as Unicode (grinning=😀, smiley=😃, white_check_mark=✅). The complete independently authored small subset is EMOJI_ALIASES in chat_style.py. Unknown/custom aliases stay escaped :name: text without custom image/API calls. Emoji appearance depends on the OS. Avatars use deterministic username initials/colors, not fetched profile images. All attachments including HTML/SVG remain download cards, not sanitized files. No scripts, external fonts/CDNs or network viewer dependencies are introduced.
