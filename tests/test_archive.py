@@ -56,7 +56,7 @@ class ArchiveTests(unittest.TestCase):
         member = 'data/path/report.pptx'
         expected = m.hashlib.sha256(member.encode()).hexdigest()[-8:]
         self.assertEqual(m.attachment_target(member, 'report.pptx', used),
-                         'attachments/report__' + expected + '.pptx')
+                         'attachments/report_' + expected + '.pptx')
 
     def test_attachment_collision_expands_case_insensitively(self):
         used = set()
@@ -65,14 +65,14 @@ class ArchiveTests(unittest.TestCase):
             first = m.attachment_target('one', 'Report.pdf', used)
             second = m.attachment_target('two', 'report.pdf', used)
             third = m.attachment_target('three', 'report.pdf', used)
-        self.assertEqual(first, 'attachments/Report__aaaaaaaa.pdf')
-        self.assertEqual(second, 'attachments/report__aaaaaaaaaaaa.pdf')
-        self.assertEqual(third, 'attachments/report__aaaaaaaaaaaaaaaa.pdf')
+        self.assertEqual(first, 'attachments/Report_aaaaaaaa.pdf')
+        self.assertEqual(second, 'attachments/report_aaaaaaaaaaaa.pdf')
+        self.assertEqual(third, 'attachments/report_aaaaaaaaaaaaaaaa.pdf')
 
     def test_full_attachment_collision_refused(self):
         with patch.object(m.hashlib, 'sha256') as fake:
             fake.return_value.hexdigest.return_value = 'a' * 64
-            used = {'attachments/report__' + 'a' * n for n in range(8, 65, 4)}
+            used = {'attachments/report_' + 'a' * n for n in range(8, 65, 4)}
             with self.assertRaises(m.ArchiveError):
                 m.attachment_target('one', 'report', used)
 

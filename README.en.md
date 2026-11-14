@@ -121,7 +121,7 @@ Compare the server SHA-256 with Linux `sha256sum archive.zip`, macOS `shasum -a 
 
 Extract into a new folder and open **index.html** in a browser. Check text, chronological order, expandable threads and attachments. Keep the folder structure intact. Internet and SSH tunnels are not needed for viewing.
 
-Attachment names use `sanitized-name__last8hash.ext`, extending the suffix on collision. Integrity verification retains full SHA-256 hashes.
+Attachment names use `NFC-name_last8hash.ext`, extending the suffix on collision. Integrity verification retains full SHA-256 hashes.
 
 ## More information
 
@@ -152,3 +152,5 @@ python3 mattermost_archiver.py verify "$OUT"
 Team/channel anchors and native reply/reaction details work without JavaScript. “답글 N개” counts **direct replies**; deeper replies expand separately. Reaction chips count **unique exact usernames per Unicode emoji**, merging synonymous aliases (+1/thumbsup/thumbs_up). Every original record, including duplicates, retains user, timestamp and alias in details. Visible times use YYYY-MM-DD HH:mm in the chosen timezone; exact ISO seconds/fractions/UTC offset remain in time datetime/title.
 
 Common reactions render as Unicode (grinning=😀, smiley=😃, white_check_mark=✅). The complete independently authored small subset is EMOJI_ALIASES in chat_style.py. Unknown/custom aliases stay escaped :name: text without custom image/API calls. Emoji appearance depends on the OS. Avatars use deterministic username initials/colors, not fetched profile images. All attachments including HTML/SVG remain download cards, not sanitized files. No scripts, external fonts/CDNs or network viewer dependencies are introduced.
+
+Attachment names preserve Unicode/Korean and ordinary spaces, composing NFD to NFC, with one underscore before the hash. Windows reserved characters/names, controls/bidi controls and trailing spaces/dots are made safe. The entire component including hash/extension is limited to 240 UTF-8 bytes and 240 UTF-16 units. A final extension within 32 bytes/units is preserved; longer extensions become stem text and may be truncated before appending the hash, never shortened into a different file type. Collision keys use NFC+casefold. HTML links are URL-encoded; original display names remain HTML-escaped. Reconvert the existing raw export to a **new output ZIP**; no server re-export is needed.

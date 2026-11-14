@@ -240,7 +240,7 @@ python3 -m unittest discover -s tests -v
 공식 v11.7.0 근거: [export 명령](https://github.com/mattermost/mattermost/blob/v11.7.0/server/cmd/mmctl/commands/export.go), [JSON 출력](https://github.com/mattermost/mattermost/blob/v11.7.0/server/cmd/mmctl/printer/printer.go), [worker](https://github.com/mattermost/mattermost/blob/v11.7.0/server/channels/jobs/export_process/worker.go), [첨부 저장](https://github.com/mattermost/mattermost/blob/v11.7.0/server/channels/app/export.go), [data 상수](https://github.com/mattermost/mattermost/blob/v11.7.0/server/public/model/bulk_export.go). 루트는 `import.jsonl`, 첨부 경로 PATH는 정확히 `data/PATH`입니다. 작업 JSON은 소문자 필드이며 보통 단일 객체 배열입니다. type은 `export_process`, 성공 status는 `success`, 파일명은 `JOBID_export.zip`입니다. 알 수 없는 배치는 추측하지 않고 실패합니다.
 
 ### 첨부파일 이름
-저장 파일명은 `정규화된파일명__해시뒤8자리.확장자` 형태입니다. 해시는 파일 내용이 아닌 원본 ZIP 내부 경로의 SHA-256입니다. 대소문자를 구분하지 않는 파일명 충돌이 발생하면 12·16자리부터 최대 64자리까지 확장하며, 그래도 충돌하면 덮어쓰지 않고 실패합니다. HTML 표시 이름은 원래 이름을 유지하고 무결성 검증 해시는 전체 SHA-256을 사용합니다. 기존 아카이브는 자동 변경되지 않으므로 원본 export를 새 출력 ZIP으로 다시 변환하세요.
+저장 파일명은 `정규화된파일명_해시뒤8자리.확장자` 형태입니다. 해시는 파일 내용이 아닌 원본 ZIP 내부 경로의 SHA-256입니다. 대소문자를 구분하지 않는 파일명 충돌이 발생하면 12·16자리부터 최대 64자리까지 확장하며, 그래도 충돌하면 덮어쓰지 않고 실패합니다. HTML 표시 이름은 원래 이름을 유지하고 무결성 검증 해시는 전체 SHA-256을 사용합니다. 기존 아카이브는 자동 변경되지 않으므로 원본 export를 새 출력 ZIP으로 다시 변환하세요.
 
 Docker copy reference: https://docs.docker.com/reference/cli/docker/container/cp/ — -a preserves source UID/GID; copying a directory to a nonexistent destination creates that destination. UUID paths must not be reused. No real Docker validation was performed for this revision.
 
@@ -258,3 +258,5 @@ python3 mattermost_archiver.py verify "$OUT"
 팀/채널 링크와 답글·반응 펼치기는 JavaScript 없이 동작합니다. **답글 N개는 직접 답글 수**이며 중첩 답글은 안에서 다시 펼칩니다. 반응 숫자는 **이모지별 고유 사용자 수**입니다. +1/thumbsup/thumbs_up처럼 동일 Unicode 별칭은 합치고, 중복 기록도 상세에 사용자·원래 별칭·시각을 모두 남깁니다. 보이는 시각은 선택 시간대의 YYYY-MM-DD HH:mm이며 정확한 ISO 초/소수초/UTC 오프셋은 time의 datetime/title에 남습니다.
 
 기본 반응은 Unicode로 표시합니다(grinning=😀, smiley=😃, white_check_mark=✅). 직접 작성한 전체 소규모 지원 목록은 chat_style.py의 EMOJI_ALIASES입니다. 미지원·커스텀 반응은 이스케이프된 :name:이며 이미지/API를 조회하지 않습니다. 이모지 모양은 OS에 따라 다릅니다. 아바타는 이름 기반 이니셜·색상이며 프로필 사진을 가져오지 않습니다. HTML/SVG 포함 첨부는 다운로드 카드일 뿐 안전하게 변환된 파일이 아닙니다. 오프라인·무스크립트·외부 폰트/CDN 없음 정책을 유지합니다.
+
+첨부 저장명은 한글·유니코드와 일반 공백을 보존하고 NFD를 NFC로 조합합니다. 구분자는 밑줄 하나입니다. Windows 예약 문자/이름, 제어·방향 문자 및 끝 공백/마침표는 안전하게 처리합니다. 해시·확장자를 포함해 UTF-8 240바이트와 UTF-16 240단위 이내로 제한합니다. 최종 확장자는 32바이트/단위 이내일 때 보존하고, 초과하면 본문으로 취급해 이름을 자른 뒤 해시를 붙입니다(확장자를 다른 형식으로 잘라내지 않음). NFC+casefold 충돌 시 해시를 확장합니다. HTML 링크는 URL 인코딩하고 표시 이름은 원본을 HTML 이스케이프합니다. 기존 raw export를 **새 출력 ZIP으로 재변환**하면 적용됩니다. 서버 재추출은 필요 없습니다.

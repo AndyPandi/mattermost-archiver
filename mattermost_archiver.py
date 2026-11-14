@@ -16,6 +16,8 @@ import shutil
 import stat
 import sys
 import tempfile
+import unicodedata
+from urllib.parse import quote
 import zipfile
 from zoneinfo import ZoneInfo
 
@@ -34,15 +36,46 @@ def digest(stream):
     return h.hexdigest()
 
 
+def filename_prefix(value, byte_limit, unit_limit):
+    """Truncate at code point boundaries under UTF-8 and UTF-16 limits."""
+    result = []
+    bytes_used = units_used = 0
+    for char in value:
+        byte_size = len(char.encode('utf-8'))
+        unit_size = len(char.encode('utf-16-le')) // 2
+        if bytes_used + byte_size > byte_limit or units_used + unit_size > unit_limit:
+            break
+        result.append(char)
+        bytes_used += byte_size
+        units_used += unit_size
+    return ''.join(result)
+
+
 def attachment_target(member, base, used):
-    """Short path hash suffix, expanded on case-insensitive filename collision."""
+    """NFC basename, original-member hash; portable component <=240 bytes/units."""
+    base = unicodedata.normalize('NFC', base)
+    base = ''.join('_' if c in '<>:"/\\|?*' or
+                   unicodedata.category(c).startswith('C') or c in '\u2028\u2029'
+                   else c for c in base).rstrip(' .')
+    base = base or 'attachment'
     suffix = PurePosixPath(base).suffix
+    # Preserve reasonable final extensions intact. An oversized extension becomes
+    # stem text, never truncated into a different, misleading file type.
+    if len(suffix.encode('utf-8')) > 32 or len(suffix.encode('utf-16-le')) // 2 > 32:
+        suffix = ''
     stem = base[:-len(suffix)] if suffix else base
+    if re.fullmatch(r'(?i:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])',
+                    stem.split('.')[0].rstrip(' ')):
+        stem = '_' + stem
     full_hash = hashlib.sha256(member.encode()).hexdigest()
     for length in range(8, 65, 4):
-        target = 'attachments/' + stem + '__' + full_hash[-length:] + suffix
-        if target.casefold() not in used:
-            used.add(target.casefold())
+        ending = '_' + full_hash[-length:] + suffix
+        prefix = filename_prefix(stem, 240 - len(ending.encode('utf-8')),
+                                 240 - len(ending.encode('utf-16-le')) // 2).rstrip(' .')
+        target = 'attachments/' + (prefix or 'attachment') + ending
+        key = unicodedata.normalize('NFC', target.casefold())
+        if key not in used:
+            used.add(key)
             return target
     raise ArchiveError('Attachment filename collision even at full SHA-256')
 
@@ -306,7 +339,7 @@ def convert(args):
                     raise ArchiveError('Selected attachment missing from export')
                 if info.is_dir():
                     raise ArchiveError('Attachment is a directory')
-                base = re.sub(r'[^A-Za-z0-9._-]', '_', PurePosixPath(path).name)[:100] or 'attachment'
+                base = PurePosixPath(path).name
                 target = attachment_target(member, base, used_attachment_names)
                 h = hashlib.sha256()
                 size = 0
@@ -353,7 +386,7 @@ def convert(args):
                 s += '<pre>' + esc(p.get('message') or '') + '</pre>'
                 for a in p.get('attachments') or []:
                     target = attach(a['path'])
-                    s += '<div class="attachment"><a download rel="noopener noreferrer" href="' + esc(target) + '">↓ ' + esc(PurePosixPath(a['path']).name) + '</a><p>다운로드 · 신뢰할 수 없는 첨부파일 (untrusted attachment)</p></div>'
+                    s += '<div class="attachment"><a download rel="noopener noreferrer" href="' + esc(quote(target, safe='/')) + '">↓ ' + esc(PurePosixPath(a['path']).name) + '</a><p>다운로드 · 신뢰할 수 없는 첨부파일 (untrusted attachment)</p></div>'
                 reactions = collections.defaultdict(list)
                 for reaction in p.get('reactions') or []:
                     name = reaction['emoji_name']
